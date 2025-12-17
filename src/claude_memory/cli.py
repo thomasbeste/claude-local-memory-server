@@ -3,16 +3,19 @@
 import json
 import click
 
-from .storage import MemoryStorage
+from .storage import MemoryStorage, get_current_project, detect_project
 
 
 @click.group()
 @click.option("--data-dir", default="~/.claude-memory", help="Data directory for memories")
+@click.option("--project", "-p", default=None, help="Project ID (auto-detected from git if not specified)")
 @click.pass_context
-def main(ctx: click.Context, data_dir: str) -> None:
+def main(ctx: click.Context, data_dir: str, project: str | None) -> None:
     """Claude Memory - Local persistent memory for Claude."""
     ctx.ensure_object(dict)
     ctx.obj["storage"] = MemoryStorage(data_dir)
+    # Auto-detect project if not specified
+    ctx.obj["project"] = project or get_current_project()
 
 
 @main.command()
@@ -20,17 +23,23 @@ def main(ctx: click.Context, data_dir: str) -> None:
 @click.option("--type", "memory_type", default="observation", help="Memory type")
 @click.option("--tags", "-t", multiple=True, help="Tags (can be repeated)")
 @click.option("--source", "-s", help="Source/context")
+@click.option("--no-project", is_flag=True, help="Don't associate with current project")
 @click.pass_context
-def add(ctx: click.Context, content: str, memory_type: str, tags: tuple, source: str | None) -> None:
+def add(ctx: click.Context, content: str, memory_type: str, tags: tuple, source: str | None, no_project: bool) -> None:
     """Add a new memory."""
     storage: MemoryStorage = ctx.obj["storage"]
+    project_id = None if no_project else ctx.obj.get("project")
+
     result = storage.add(
         content=content,
         memory_type=memory_type,
         tags=list(tags) if tags else None,
         source=source,
+        project_id=project_id,
     )
     click.echo(f"Added memory: {result['id']}")
+    if project_id:
+        click.echo(f"Project: {project_id}")
     click.echo(json.dumps(result, default=str, indent=2))
 
 
@@ -41,30 +50,38 @@ def add(ctx: click.Context, content: str, memory_type: str, tags: tuple, source:
 @click.option("--limit", "-n", default=20, help="Max results")
 @click.option("--mode", "-m", default="hybrid", type=click.Choice(["keyword", "semantic", "hybrid"]),
               help="Search mode: keyword (exact), semantic (meaning), hybrid (both)")
+@click.option("--global", "-g", "global_search", is_flag=True, help="Search across all projects")
 @click.pass_context
-def search(ctx: click.Context, query: str | None, memory_type: str | None, tags: tuple, limit: int, mode: str) -> None:
+def search(ctx: click.Context, query: str | None, memory_type: str | None, tags: tuple, limit: int, mode: str, global_search: bool) -> None:
     """Search memories with keyword, semantic, or hybrid search."""
     storage: MemoryStorage = ctx.obj["storage"]
+    project_id = ctx.obj.get("project")
+
     results = storage.search(
         query=query,
         memory_type=memory_type,
         tags=list(tags) if tags else None,
+        project_id=project_id,
+        global_search=global_search,
         limit=limit,
         search_mode=mode,
     )
     if not results:
-        click.echo("No memories found.")
+        scope = "all projects" if global_search else f"project '{project_id}'" if project_id else "all memories"
+        click.echo(f"No memories found in {scope}.")
         return
 
-    click.echo(f"Found {len(results)} memories (mode: {mode}):\n")
+    scope_str = "all projects" if global_search else f"project '{project_id}'" if project_id else "all"
+    click.echo(f"Found {len(results)} memories (mode: {mode}, scope: {scope_str}):\n")
     for mem in results:
         tags_str = ", ".join(mem["tags"]) if mem["tags"] else "none"
+        project_str = f" @{mem['project_id']}" if mem.get("project_id") else ""
         score_str = ""
         if "score" in mem:
             score_str = f" [score: {mem['score']:.3f}]"
         elif "hybrid_score" in mem:
             score_str = f" [hybrid: {mem['hybrid_score']:.4f}]"
-        click.echo(f"[{mem['id']}] ({mem['memory_type']}){score_str} {mem['content'][:80]}")
+        click.echo(f"[{mem['id']}] ({mem['memory_type']}){project_str}{score_str} {mem['content'][:70]}")
         click.echo(f"    tags: {tags_str} | {mem['created_at']}")
         click.echo()
 
@@ -82,23 +99,51 @@ def delete(ctx: click.Context, memory_id: str) -> None:
 
 
 @main.command()
+@click.option("--global", "-g", "global_stats", is_flag=True, help="Show stats for all projects")
 @click.pass_context
-def stats(ctx: click.Context) -> None:
+def stats(ctx: click.Context, global_stats: bool) -> None:
     """Show memory statistics."""
     storage: MemoryStorage = ctx.obj["storage"]
-    s = storage.stats()
+    project_id = None if global_stats else ctx.obj.get("project")
+
+    s = storage.stats(project_id=project_id)
+
+    if project_id:
+        click.echo(f"Project: {project_id}")
     click.echo(f"Total memories: {s['total_memories']}")
     click.echo(f"With embeddings: {s.get('memories_with_embeddings', 'N/A')}")
     click.echo(f"Embeddings available: {s.get('embeddings_available', False)}")
     click.echo(f"Storage: {s['storage_path']}")
+
     if s["by_type"]:
         click.echo("\nBy type:")
         for t, count in s["by_type"].items():
             click.echo(f"  {t}: {count}")
+
     if s.get("by_client"):
         click.echo("\nBy client:")
         for c, count in s["by_client"].items():
             click.echo(f"  {c}: {count}")
+
+    if s.get("by_project") and (global_stats or not project_id):
+        click.echo("\nBy project:")
+        for p, count in s["by_project"].items():
+            click.echo(f"  {p}: {count}")
+
+
+@main.command("project")
+@click.pass_context
+def show_project(ctx: click.Context) -> None:
+    """Show the current project (auto-detected or specified)."""
+    project = ctx.obj.get("project")
+    if project:
+        click.echo(f"Current project: {project}")
+        detected = detect_project()
+        if detected and detected != project:
+            click.echo(f"(Auto-detected: {detected}, overridden by --project or MEMORY_PROJECT)")
+    else:
+        click.echo("No project detected.")
+        click.echo("Run from within a git repository to auto-detect, or use --project/-p flag.")
 
 
 @main.command("backfill-embeddings")

@@ -24,6 +24,7 @@ A lightweight memory server that gives Claude Code durable, searchable memory ac
 - **Persistent storage** – Memories survive restarts, stored in DuckDB
 - **Semantic search** – Find memories by meaning, not just keywords
 - **Hybrid search** – Combines keyword matching with vector similarity (RRF)
+- **Project scoping** – Auto-detect project from git, isolate memories per project
 - **Shared across machines** – Run a central server, connect from anywhere
 - **Fast queries** – DuckDB-powered with automatic indexing
 - **Client tracking** – Know which machine created each memory
@@ -90,10 +91,19 @@ Once configured, Claude can store and retrieve memories:
 ### CLI Commands
 
 ```bash
-# Add a memory
+# Show current project (auto-detected from git)
+claude-memory project
+
+# Add a memory (auto-associates with current project)
 claude-memory add "Project X uses Python 3.12" --type fact --tags project:x
 
-# Search memories (default: hybrid mode)
+# Add memory to a specific project
+claude-memory -p my-project add "Memory content"
+
+# Add memory without project association
+claude-memory add "Global memory" --no-project
+
+# Search memories (default: hybrid mode, scoped to current project)
 claude-memory search --query "Python"
 
 # Search with specific mode
@@ -101,11 +111,17 @@ claude-memory search -q "software development" -m semantic  # meaning-based
 claude-memory search -q "Python" -m keyword                  # exact matching
 claude-memory search -q "API framework" -m hybrid            # combined (default)
 
+# Search across ALL projects
+claude-memory search -q "Python" --global
+
 # Filter by type and tags
 claude-memory search --type decision --tags project:x
 
-# View statistics
+# View statistics (for current project)
 claude-memory stats
+
+# View statistics across all projects
+claude-memory stats --global
 
 # Backfill embeddings for existing memories
 claude-memory backfill-embeddings
@@ -142,6 +158,7 @@ claude-memory delete <memory-id>
 | `MEMORY_SERVER` | HTTP server URL (client mode) |
 | `MEMORY_API_KEY` | API key for authentication |
 | `MEMORY_CLIENT_ID` | Identifier for this client (e.g., "laptop", "work-pc") |
+| `MEMORY_PROJECT` | Override auto-detected project ID |
 
 ### Server Options
 

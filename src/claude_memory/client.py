@@ -10,17 +10,25 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 
-def create_client_server(server_url: str, api_key: str | None = None, client_id: str | None = None) -> Server:
+def create_client_server(
+    server_url: str,
+    api_key: str | None = None,
+    client_id: str | None = None,
+    project_id: str | None = None,
+) -> Server:
     """Create MCP server that proxies to HTTP backend."""
-    
+
     server = Server("claude-memory-client")
-    
+    _project_id = project_id
+
     def get_headers() -> dict:
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["X-API-Key"] = api_key
         if client_id:
             headers["X-Client-ID"] = client_id
+        if _project_id:
+            headers["X-Project-ID"] = _project_id
         return headers
 
     @server.list_tools()
@@ -52,6 +60,10 @@ def create_client_server(server_url: str, api_key: str | None = None, client_id:
                             "type": "string",
                             "description": "Optional source/context for this memory",
                         },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project to associate with (uses auto-detected project if not specified)",
+                        },
                     },
                     "required": ["content"],
                 },
@@ -79,6 +91,15 @@ def create_client_server(server_url: str, api_key: str | None = None, client_id:
                         "client_id": {
                             "type": "string",
                             "description": "Filter by client ID (e.g., 'laptop', 'desktop')",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Filter by project ID (uses current project if not specified)",
+                        },
+                        "global_search": {
+                            "type": "boolean",
+                            "description": "Search across all projects (ignores project_id filter)",
+                            "default": False,
                         },
                         "limit": {
                             "type": "integer",
@@ -155,6 +176,7 @@ def create_client_server(server_url: str, api_key: str | None = None, client_id:
                             "memory_type": arguments.get("memory_type", "observation"),
                             "tags": arguments.get("tags"),
                             "source": arguments.get("source"),
+                            "project_id": arguments.get("project_id"),
                         },
                     )
                     resp.raise_for_status()
@@ -170,6 +192,8 @@ def create_client_server(server_url: str, api_key: str | None = None, client_id:
                             "memory_type": arguments.get("memory_type"),
                             "tags": arguments.get("tags"),
                             "client_id": arguments.get("client_id"),
+                            "project_id": arguments.get("project_id"),
+                            "global_search": arguments.get("global_search", False),
                             "limit": arguments.get("limit", 20),
                             "search_mode": arguments.get("search_mode", "hybrid"),
                         },
@@ -229,11 +253,15 @@ def create_client_server(server_url: str, api_key: str | None = None, client_id:
 
 async def main() -> None:
     """Run the MCP client server."""
+    from .storage import get_current_project
+
     server_url = os.environ.get("MEMORY_SERVER", "http://localhost:8420")
     api_key = os.environ.get("MEMORY_API_KEY")
     client_id = os.environ.get("MEMORY_CLIENT_ID")
-    
-    server = create_client_server(server_url, api_key, client_id)
+    # Auto-detect project if not specified via env
+    project_id = os.environ.get("MEMORY_PROJECT") or get_current_project()
+
+    server = create_client_server(server_url, api_key, client_id, project_id)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 

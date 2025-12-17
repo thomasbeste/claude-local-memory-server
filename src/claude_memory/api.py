@@ -18,6 +18,7 @@ class MemoryCreate(BaseModel):
     tags: list[str] | None = None
     source: str | None = None
     client_id: str | None = None  # Can also be set via X-Client-ID header
+    project_id: str | None = None  # Can also be set via X-Project-ID header
 
 
 class MemoryUpdate(BaseModel):
@@ -30,6 +31,8 @@ class SearchQuery(BaseModel):
     memory_type: str | None = None
     tags: list[str] | None = None
     client_id: str | None = None
+    project_id: str | None = None  # Filter by project
+    global_search: bool = False  # Search across all projects
     limit: int = 20
     search_mode: str = "hybrid"  # "keyword", "semantic", "hybrid"
 
@@ -85,18 +88,21 @@ async def health():
 async def create_memory(
     memory: MemoryCreate,
     x_client_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
     store: MemoryStorage = Depends(get_storage),
     _: str | None = Depends(verify_api_key),
 ):
     """Create a new memory."""
-    # Prefer body client_id, fall back to header
+    # Prefer body values, fall back to headers
     client_id = memory.client_id or x_client_id
+    project_id = memory.project_id or x_project_id
     result = store.add(
         content=memory.content,
         memory_type=memory.memory_type,
         tags=memory.tags,
         source=memory.source,
         client_id=client_id,
+        project_id=project_id,
     )
     return result
 
@@ -104,15 +110,20 @@ async def create_memory(
 @app.post("/memories/search")
 async def search_memories(
     query: SearchQuery,
+    x_project_id: Annotated[str | None, Header()] = None,
     store: MemoryStorage = Depends(get_storage),
     _: str | None = Depends(verify_api_key),
 ):
     """Search memories. Supports keyword, semantic, and hybrid search modes."""
+    # Prefer body project_id, fall back to header
+    project_id = query.project_id or x_project_id
     results = store.search(
         query=query.query,
         memory_type=query.memory_type,
         tags=query.tags,
         client_id=query.client_id,
+        project_id=project_id,
+        global_search=query.global_search,
         limit=query.limit,
         search_mode=query.search_mode,
     )
@@ -161,11 +172,14 @@ async def delete_memory(
 
 @app.get("/stats")
 async def get_stats(
+    project_id: str | None = None,
+    x_project_id: Annotated[str | None, Header()] = None,
     store: MemoryStorage = Depends(get_storage),
     _: str | None = Depends(verify_api_key),
 ):
-    """Get memory statistics."""
-    return store.stats()
+    """Get memory statistics, optionally filtered by project."""
+    effective_project = project_id or x_project_id
+    return store.stats(project_id=effective_project)
 
 
 # --- Entrypoint ---

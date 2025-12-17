@@ -196,3 +196,66 @@ class TestMemoryStorage:
             assert stats["memories_with_embeddings"] == 2
         else:
             assert stats["memories_with_embeddings"] == 0
+
+    def test_add_memory_with_project(self, storage):
+        """Test adding a memory with project_id."""
+        result = storage.add(
+            content="Project-specific memory",
+            memory_type="fact",
+            project_id="my-project",
+        )
+
+        assert result["project_id"] == "my-project"
+
+        # Verify it's stored correctly
+        retrieved = storage.get(result["id"])
+        assert retrieved["project_id"] == "my-project"
+
+    def test_search_by_project(self, storage):
+        """Test searching memories filtered by project."""
+        storage.add(content="Project A memory", project_id="project-a")
+        storage.add(content="Project B memory", project_id="project-b")
+        storage.add(content="No project memory")
+
+        # Search within project A
+        results = storage.search(project_id="project-a", search_mode="keyword")
+        assert len(results) == 1
+        assert results[0]["project_id"] == "project-a"
+
+        # Search within project B
+        results = storage.search(project_id="project-b", search_mode="keyword")
+        assert len(results) == 1
+        assert results[0]["project_id"] == "project-b"
+
+    def test_global_search_across_projects(self, storage):
+        """Test global search ignores project filter."""
+        storage.add(content="Project A memory", project_id="project-a")
+        storage.add(content="Project B memory", project_id="project-b")
+        storage.add(content="No project memory")
+
+        # Global search should return all
+        results = storage.search(global_search=True, search_mode="keyword")
+        assert len(results) == 3
+
+        # Global search with query
+        results = storage.search(query="memory", global_search=True, search_mode="keyword")
+        assert len(results) == 3
+
+    def test_stats_by_project(self, storage):
+        """Test statistics filtered by project."""
+        storage.add(content="A fact", memory_type="fact", project_id="project-a")
+        storage.add(content="A decision", memory_type="decision", project_id="project-a")
+        storage.add(content="B fact", memory_type="fact", project_id="project-b")
+
+        # Stats for project A
+        stats_a = storage.stats(project_id="project-a")
+        assert stats_a["total_memories"] == 2
+        assert stats_a["by_type"]["fact"] == 1
+        assert stats_a["by_type"]["decision"] == 1
+
+        # Global stats
+        stats_all = storage.stats()
+        assert stats_all["total_memories"] == 3
+        assert "by_project" in stats_all
+        assert stats_all["by_project"]["project-a"] == 2
+        assert stats_all["by_project"]["project-b"] == 1

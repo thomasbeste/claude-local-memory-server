@@ -114,20 +114,17 @@ Current search is `ILIKE '%query%'`. That's keyword matching from 2005.
 
 ## 3. High Priority: Scoping & Multi-tenancy
 
-Currently everything is one big bucket. That doesn't scale socially.
+~~Currently everything is one big bucket. That doesn't scale socially.~~ SOLVED
 
 ### 3.1 Project Scoping
 
-- [ ] Add `project_id` column to memories:
-  ```sql
-  ALTER TABLE memories ADD COLUMN project_id VARCHAR;
-  CREATE INDEX idx_memories_project ON memories(project_id);
-  ```
-- [ ] Auto-detect project from git repo root or config file
-- [ ] Support explicit project assignment via CLI/API
-- [ ] Add project-level statistics
-- [ ] Implement project isolation (search defaults to current project)
-- [ ] Add cross-project search with explicit flag
+- [x] Add `project_id` column to memories with index
+- [x] Auto-detect project from git repo root
+- [x] Support explicit project assignment via CLI (`--project/-p`) and API
+- [x] Add project-level statistics (`stats --global` or filter by project)
+- [x] Implement project isolation (search defaults to current project)
+- [x] Add cross-project search with `--global/-g` flag
+- [x] Support `MEMORY_PROJECT` environment variable
 
 ### 3.2 User/Workspace Scoping
 
@@ -361,24 +358,26 @@ Memories accumulate. Eventually you need synthesis, not just storage.
 |---------|--------|--------|----------|--------|
 | DuckDB Persistent Mode | High | Low | P0 | DONE |
 | Semantic Search (basic) | High | Medium | P0 | DONE |
-| Project Scoping | High | Low | P1 | |
+| Project Scoping | High | Low | P1 | DONE |
 | WAL/Event Sourcing | High | High | P1 | |
 | Knowledge Graph (basic) | Medium | Medium | P2 | |
 | Auto-Summarization | Medium | High | P2 | |
 | Web UI | Low | Medium | P3 | |
 | Distributed Sync | Medium | Very High | P3 | |
+| Docker Compose Support | Medium | Low | P1 | |
 
 ---
 
 ## Quick Wins (< 1 day each)
 
 1. ~~Switch to DuckDB persistent mode (remove Parquet dance)~~ DONE
-2. Add `project_id` column and basic filtering
+2. ~~Add `project_id` column and basic filtering~~ DONE
 3. ~~Integrate sentence-transformers for embedding generation~~ DONE
-4. Add `--project` flag to CLI commands
+4. ~~Add `--project` flag to CLI commands~~ DONE
 5. Implement basic duplicate detection
 6. Add Prometheus metrics endpoint
 7. Create backup rotation in backup.sh
+8. Add Docker Compose support
 
 ---
 

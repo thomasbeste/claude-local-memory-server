@@ -5,10 +5,52 @@ from pathlib import Path
 from typing import Any
 import uuid
 import logging
+import subprocess
+import os
 
 import duckdb
 
 logger = logging.getLogger(__name__)
+
+
+def detect_project(path: Path | str | None = None) -> str | None:
+    """
+    Auto-detect project ID from git repository root.
+
+    Returns the git repo name (directory name of repo root) or None if not in a git repo.
+    """
+    if path is None:
+        path = Path.cwd()
+    else:
+        path = Path(path).expanduser().resolve()
+
+    try:
+        # Get git repo root
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            repo_root = Path(result.stdout.strip())
+            return repo_root.name
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    return None
+
+
+def get_current_project() -> str | None:
+    """Get current project from environment or auto-detect."""
+    # Check environment variable first
+    project = os.environ.get("MEMORY_PROJECT")
+    if project:
+        return project
+
+    # Auto-detect from git
+    return detect_project()
 
 # Embedding model configuration
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # 384 dimensions, good balance of speed/quality
@@ -105,6 +147,7 @@ class MemoryStorage:
                 tags VARCHAR[],
                 source VARCHAR,
                 client_id VARCHAR,
+                project_id VARCHAR,
                 created_at TIMESTAMP WITH TIME ZONE,
                 updated_at TIMESTAMP WITH TIME ZONE,
                 embedding FLOAT[]
@@ -121,13 +164,21 @@ class MemoryStorage:
         self.db.execute("""
             CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at DESC)
         """)
+        self.db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_id)
+        """)
 
-        # Check if embedding column exists (for upgrades from older versions)
+        # Schema migrations for existing databases
         columns = self.db.execute("DESCRIBE memories").fetchall()
         column_names = [col[0] for col in columns]
+
         if "embedding" not in column_names:
             logger.info("Adding embedding column to existing database")
             self.db.execute("ALTER TABLE memories ADD COLUMN embedding FLOAT[]")
+
+        if "project_id" not in column_names:
+            logger.info("Adding project_id column to existing database")
+            self.db.execute("ALTER TABLE memories ADD COLUMN project_id VARCHAR")
 
     def _migrate_from_parquet(self) -> None:
         """Migrate data from legacy parquet file if it exists."""
@@ -180,6 +231,7 @@ class MemoryStorage:
         tags: list[str] | None = None,
         source: str | None = None,
         client_id: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         """Add a new memory with optional embedding."""
         memory_id = str(uuid.uuid4())[:8]
@@ -191,10 +243,10 @@ class MemoryStorage:
 
         self.db.execute(
             """
-            INSERT INTO memories (id, content, memory_type, tags, source, client_id, created_at, updated_at, embedding)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO memories (id, content, memory_type, tags, source, client_id, project_id, created_at, updated_at, embedding)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [memory_id, content, memory_type, tags, source, client_id, now, now, embedding],
+            [memory_id, content, memory_type, tags, source, client_id, project_id, now, now, embedding],
         )
 
         return {
@@ -204,6 +256,7 @@ class MemoryStorage:
             "tags": tags,
             "source": source,
             "client_id": client_id,
+            "project_id": project_id,
             "created_at": now.isoformat(),
             "has_embedding": embedding is not None,
         }
@@ -214,16 +267,27 @@ class MemoryStorage:
         memory_type: str | None = None,
         tags: list[str] | None = None,
         client_id: str | None = None,
+        project_id: str | None = None,
+        global_search: bool = False,
         limit: int = 20,
         search_mode: str = "hybrid",  # "keyword", "semantic", "hybrid"
     ) -> list[dict[str, Any]]:
         """
         Search memories with optional filters.
 
-        search_mode:
-            - "keyword": Traditional ILIKE substring matching
-            - "semantic": Vector similarity search using embeddings
-            - "hybrid": Combines keyword and semantic (default)
+        Args:
+            query: Search text
+            memory_type: Filter by memory type
+            tags: Filter by tags (matches any)
+            client_id: Filter by client ID
+            project_id: Filter by project ID. If None and global_search=False,
+                       no project filter is applied (for backwards compatibility).
+            global_search: If True, search across all projects (ignore project_id)
+            limit: Max results to return
+            search_mode:
+                - "keyword": Traditional ILIKE substring matching
+                - "semantic": Vector similarity search using embeddings
+                - "hybrid": Combines keyword and semantic (default)
         """
         # If no query provided, fall back to keyword mode (just filters)
         if not query:
@@ -235,12 +299,15 @@ class MemoryStorage:
             logger.debug("Semantic search unavailable, falling back to keyword")
             search_mode = "keyword"
 
+        # Determine effective project filter
+        effective_project = None if global_search else project_id
+
         if search_mode == "keyword":
-            return self._keyword_search(query, memory_type, tags, client_id, limit)
+            return self._keyword_search(query, memory_type, tags, client_id, effective_project, limit)
         elif search_mode == "semantic":
-            return self._semantic_search(query, memory_type, tags, client_id, limit)
+            return self._semantic_search(query, memory_type, tags, client_id, effective_project, limit)
         else:  # hybrid
-            return self._hybrid_search(query, memory_type, tags, client_id, limit)
+            return self._hybrid_search(query, memory_type, tags, client_id, effective_project, limit)
 
     def _keyword_search(
         self,
@@ -248,6 +315,7 @@ class MemoryStorage:
         memory_type: str | None,
         tags: list[str] | None,
         client_id: str | None,
+        project_id: str | None,
         limit: int,
     ) -> list[dict[str, Any]]:
         """Traditional keyword-based search."""
@@ -270,12 +338,16 @@ class MemoryStorage:
             conditions.append("client_id = ?")
             params.append(client_id)
 
+        if project_id:
+            conditions.append("project_id = ?")
+            params.append(project_id)
+
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         params.append(limit)
 
         result = self.db.execute(
             f"""
-            SELECT id, content, memory_type, tags, source, client_id, created_at, updated_at
+            SELECT id, content, memory_type, tags, source, client_id, project_id, created_at, updated_at
             FROM memories
             WHERE {where_clause}
             ORDER BY created_at DESC
@@ -284,7 +356,7 @@ class MemoryStorage:
             params,
         ).fetchall()
 
-        columns = ["id", "content", "memory_type", "tags", "source", "client_id", "created_at", "updated_at"]
+        columns = ["id", "content", "memory_type", "tags", "source", "client_id", "project_id", "created_at", "updated_at"]
         return [dict(zip(columns, row)) for row in result]
 
     def _semantic_search(
@@ -293,13 +365,14 @@ class MemoryStorage:
         memory_type: str | None,
         tags: list[str] | None,
         client_id: str | None,
+        project_id: str | None,
         limit: int,
         min_score: float = 0.0,
     ) -> list[dict[str, Any]]:
         """Vector similarity search using embeddings."""
         query_embedding = self.embedder.embed(query)
         if query_embedding is None:
-            return self._keyword_search(query, memory_type, tags, client_id, limit)
+            return self._keyword_search(query, memory_type, tags, client_id, project_id, limit)
 
         conditions = ["embedding IS NOT NULL"]
         params = []
@@ -316,6 +389,10 @@ class MemoryStorage:
             conditions.append("client_id = ?")
             params.append(client_id)
 
+        if project_id:
+            conditions.append("project_id = ?")
+            params.append(project_id)
+
         where_clause = " AND ".join(conditions)
 
         # Add query embedding and limit at the end
@@ -324,7 +401,7 @@ class MemoryStorage:
         result = self.db.execute(
             f"""
             SELECT
-                id, content, memory_type, tags, source, client_id, created_at, updated_at,
+                id, content, memory_type, tags, source, client_id, project_id, created_at, updated_at,
                 list_cosine_similarity(embedding, ?::FLOAT[]) as score
             FROM memories
             WHERE {where_clause}
@@ -335,7 +412,7 @@ class MemoryStorage:
             [query_embedding] + params,
         ).fetchall()
 
-        columns = ["id", "content", "memory_type", "tags", "source", "client_id", "created_at", "updated_at", "score"]
+        columns = ["id", "content", "memory_type", "tags", "source", "client_id", "project_id", "created_at", "updated_at", "score"]
         return [dict(zip(columns, row)) for row in result]
 
     def _hybrid_search(
@@ -344,6 +421,7 @@ class MemoryStorage:
         memory_type: str | None,
         tags: list[str] | None,
         client_id: str | None,
+        project_id: str | None,
         limit: int,
         alpha: float = 0.5,  # Weight for semantic vs keyword (0=keyword only, 1=semantic only)
     ) -> list[dict[str, Any]]:
@@ -352,8 +430,8 @@ class MemoryStorage:
         Uses Reciprocal Rank Fusion (RRF) to merge results.
         """
         # Get results from both methods
-        keyword_results = self._keyword_search(query, memory_type, tags, client_id, limit * 2)
-        semantic_results = self._semantic_search(query, memory_type, tags, client_id, limit * 2)
+        keyword_results = self._keyword_search(query, memory_type, tags, client_id, project_id, limit * 2)
+        semantic_results = self._semantic_search(query, memory_type, tags, client_id, project_id, limit * 2)
 
         # If semantic failed, just return keyword
         if not semantic_results or not any(r.get("score") for r in semantic_results):
@@ -391,14 +469,14 @@ class MemoryStorage:
     def get(self, memory_id: str) -> dict[str, Any] | None:
         """Get a specific memory by ID."""
         result = self.db.execute(
-            "SELECT id, content, memory_type, tags, source, client_id, created_at, updated_at FROM memories WHERE id = ?",
+            "SELECT id, content, memory_type, tags, source, client_id, project_id, created_at, updated_at FROM memories WHERE id = ?",
             [memory_id]
         ).fetchone()
 
         if not result:
             return None
 
-        columns = ["id", "content", "memory_type", "tags", "source", "client_id", "created_at", "updated_at"]
+        columns = ["id", "content", "memory_type", "tags", "source", "client_id", "project_id", "created_at", "updated_at"]
         return dict(zip(columns, result))
 
     def delete(self, memory_id: str) -> bool:
@@ -449,33 +527,58 @@ class MemoryStorage:
 
         return self.get(memory_id)
 
-    def stats(self) -> dict[str, Any]:
-        """Get storage statistics."""
-        total = self.db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
-        with_embeddings = self.db.execute(
-            "SELECT COUNT(*) FROM memories WHERE embedding IS NOT NULL"
+    def stats(self, project_id: str | None = None) -> dict[str, Any]:
+        """Get storage statistics, optionally filtered by project."""
+        project_filter = ""
+        params: list = []
+        if project_id:
+            project_filter = "WHERE project_id = ?"
+            params = [project_id]
+
+        total = self.db.execute(
+            f"SELECT COUNT(*) FROM memories {project_filter}", params
         ).fetchone()[0]
 
-        by_type = self.db.execute("""
+        with_embeddings = self.db.execute(
+            f"SELECT COUNT(*) FROM memories WHERE embedding IS NOT NULL {'AND project_id = ?' if project_id else ''}",
+            params
+        ).fetchone()[0]
+
+        by_type = self.db.execute(f"""
             SELECT memory_type, COUNT(*) as count
             FROM memories
+            {project_filter}
             GROUP BY memory_type
-        """).fetchall()
+        """, params).fetchall()
 
-        by_client = self.db.execute("""
+        by_client = self.db.execute(f"""
             SELECT COALESCE(client_id, 'unknown') as client, COUNT(*) as count
             FROM memories
+            {project_filter}
             GROUP BY client_id
+        """, params).fetchall()
+
+        by_project = self.db.execute("""
+            SELECT COALESCE(project_id, 'unassigned') as project, COUNT(*) as count
+            FROM memories
+            GROUP BY project_id
+            ORDER BY count DESC
         """).fetchall()
 
-        return {
+        result = {
             "total_memories": total,
             "memories_with_embeddings": with_embeddings,
             "embeddings_available": Embedder.is_available(),
             "by_type": {row[0]: row[1] for row in by_type},
             "by_client": {row[0]: row[1] for row in by_client},
+            "by_project": {row[0]: row[1] for row in by_project},
             "storage_path": str(self.db_path),
         }
+
+        if project_id:
+            result["filtered_by_project"] = project_id
+
+        return result
 
     def backfill_embeddings(self, batch_size: int = 100) -> dict[str, int]:
         """
@@ -524,7 +627,7 @@ class MemoryStorage:
         path = Path(path)
 
         self.db.execute(f"""
-            COPY (SELECT id, content, memory_type, tags, source, client_id, created_at, updated_at
+            COPY (SELECT id, content, memory_type, tags, source, client_id, project_id, created_at, updated_at
                   FROM memories)
             TO '{path}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """)

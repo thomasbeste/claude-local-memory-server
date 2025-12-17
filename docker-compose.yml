@@ -1,0 +1,36 @@
+# Claude Memory Server - Docker Compose Configuration
+#
+# Quick start:
+#   docker compose up -d
+#
+# With custom API key:
+#   MEMORY_API_KEY=your-secret-key docker compose up -d
+#
+# View logs:
+#   docker compose logs -f
+
+services:
+  memory-server:
+    build: .
+    image: claude-memory:latest
+    container_name: claude-memory
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8420}:8420"
+    volumes:
+      - memory-data:/data
+    environment:
+      - MEMORY_API_KEY=${MEMORY_API_KEY:-}
+      - DATA_DIR=/data
+      - PORT=8420
+      - HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8420/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  memory-data:
+    name: claude-memory-data

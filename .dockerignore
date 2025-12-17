@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Test/Dev
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.nox
+
+# Build
+dist
+build
+*.egg-info
+
+# Data files (should be mounted)
+*.duckdb
+*.duckdb.wal
+*.parquet
+
+# Config (generated at runtime)
+.env
+client-config.txt
+
+# Scripts (not needed in image)
+scripts/
+
+# Docs
+*.md
+!README.md

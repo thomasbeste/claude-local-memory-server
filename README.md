@@ -47,14 +47,37 @@ claude mcp add-json "memory" '{
 }'
 ```
 
-### Option 2: Server Mode (shared across machines)
+### Option 2: Server Mode with Docker (recommended)
+
+```bash
+git clone https://github.com/YOUR_USERNAME/claude-memory.git
+cd claude-memory
+./scripts/install-docker.sh
+```
+
+The script builds the image, starts the container, and prints your API key.
+
+Or use docker compose directly:
+
+```bash
+# Generate an API key
+export MEMORY_API_KEY=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
+
+# Start the server
+docker compose up -d
+
+# Check status
+docker compose logs -f
+```
+
+### Option 3: Server Mode with Systemd (LXC/VM)
 
 **On your server (Debian/Ubuntu LXC, VM, etc.):**
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/claude-memory.git
 cd claude-memory
-sudo ./scripts/install.sh
+sudo ./scripts/install-systemd.sh
 ```
 
 The script installs Python, creates a systemd service, and prints your API key.
@@ -173,8 +196,19 @@ Options:
 
 ### Install Script Options
 
+**Docker (install-docker.sh):**
 ```bash
-./scripts/install.sh --help
+./scripts/install-docker.sh --help
+
+Options:
+  --port PORT         HTTP port [default: 8420]
+  --api-key KEY       Set API key (generated if omitted)
+  --no-start          Build only, don't start the container
+```
+
+**Systemd (install-systemd.sh):**
+```bash
+./scripts/install-systemd.sh --help
 
 Options:
   --port PORT         HTTP port [default: 8420]

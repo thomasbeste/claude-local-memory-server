@@ -364,7 +364,7 @@ Memories accumulate. Eventually you need synthesis, not just storage.
 | Auto-Summarization | Medium | High | P2 | |
 | Web UI | Low | Medium | P3 | |
 | Distributed Sync | Medium | Very High | P3 | |
-| Docker Compose Support | Medium | Low | P1 | |
+| Docker Compose Support | Medium | Low | P1 | DONE |
 
 ---
 
@@ -377,7 +377,7 @@ Memories accumulate. Eventually you need synthesis, not just storage.
 5. Implement basic duplicate detection
 6. Add Prometheus metrics endpoint
 7. Create backup rotation in backup.sh
-8. Add Docker Compose support
+8. ~~Add Docker Compose support~~ DONE
 
 ---
 

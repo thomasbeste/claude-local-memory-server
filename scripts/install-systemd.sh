@@ -1,11 +1,11 @@
 #!/bin/bash
 #
-# Claude Memory Server - Debian/Ubuntu Installation Script
-# 
+# Claude Memory Server - Systemd Installation Script (LXC/VM/Bare Metal)
+#
+# For Docker deployment, use install-docker.sh instead.
+#
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/.../install.sh | bash
-#   eller
-#   ./install.sh
+#   sudo ./scripts/install-systemd.sh
 #
 # Options:
 #   --port PORT         HTTP port (default: 8420)

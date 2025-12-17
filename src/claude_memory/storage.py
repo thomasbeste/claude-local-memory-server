@@ -634,6 +634,131 @@ class MemoryStorage:
 
         return str(path)
 
+    def get_context_summary(
+        self,
+        project_id: str | None = None,
+        max_memories: int = 10,
+        days: int = 30,
+    ) -> dict[str, Any]:
+        """
+        Get a curated context summary for a project.
+
+        Returns prioritized memories suitable for injection at session start.
+        Priority order: decisions > preferences > facts > observations
+
+        Args:
+            project_id: Project to get context for
+            max_memories: Maximum number of memories to include
+            days: Only include memories from the last N days
+
+        Returns:
+            Dict with summary text and metadata
+        """
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+        # Build project filter
+        project_filter = "project_id = ?" if project_id else "project_id IS NOT NULL"
+        params: list = [project_id] if project_id else []
+
+        # Query with priority ordering
+        # Decisions and preferences are most important, then facts, then observations
+        result = self.db.execute(
+            f"""
+            SELECT
+                id, content, memory_type, tags, created_at,
+                CASE memory_type
+                    WHEN 'decision' THEN 1
+                    WHEN 'preference' THEN 2
+                    WHEN 'fact' THEN 3
+                    WHEN 'entity' THEN 4
+                    WHEN 'relation' THEN 5
+                    WHEN 'observation' THEN 6
+                    ELSE 7
+                END as priority
+            FROM memories
+            WHERE {project_filter}
+            AND created_at > ?
+            ORDER BY priority ASC, created_at DESC
+            LIMIT ?
+            """,
+            params + [cutoff, max_memories * 2],  # Get extra for grouping
+        ).fetchall()
+
+        if not result:
+            return {
+                "project_id": project_id,
+                "has_context": False,
+                "summary": "No memories found for this project.",
+                "memories": [],
+            }
+
+        # Group by type for structured output
+        memories_by_type: dict[str, list] = {}
+        for row in result[:max_memories]:
+            mem_type = row[2]
+            if mem_type not in memories_by_type:
+                memories_by_type[mem_type] = []
+            memories_by_type[mem_type].append({
+                "id": row[0],
+                "content": row[1],
+                "tags": row[3],
+                "created_at": row[4],
+            })
+
+        # Build summary text
+        lines = []
+
+        if project_id:
+            lines.append(f"## Context for project: {project_id}\n")
+
+        # Format by priority
+        type_labels = {
+            "decision": "Decisions",
+            "preference": "Preferences",
+            "fact": "Key Facts",
+            "entity": "Entities",
+            "relation": "Relationships",
+            "observation": "Observations",
+        }
+
+        for mem_type in ["decision", "preference", "fact", "entity", "relation", "observation"]:
+            if mem_type in memories_by_type:
+                lines.append(f"### {type_labels.get(mem_type, mem_type.title())}")
+                for mem in memories_by_type[mem_type][:3]:  # Max 3 per type
+                    lines.append(f"- {mem['content']}")
+                lines.append("")
+
+        # Get last activity info
+        last_activity = self.db.execute(
+            f"""
+            SELECT created_at, content, memory_type
+            FROM memories
+            WHERE {project_filter}
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            [project_id] if project_id else [],
+        ).fetchone()
+
+        last_session_info = None
+        if last_activity:
+            last_session_info = {
+                "timestamp": last_activity[0],
+                "last_memory": last_activity[1],
+                "type": last_activity[2],
+            }
+
+        return {
+            "project_id": project_id,
+            "has_context": True,
+            "memory_count": len(result),
+            "summary": "\n".join(lines),
+            "memories_by_type": memories_by_type,
+            "last_activity": last_session_info,
+        }
+
     def close(self) -> None:
         """Close the database connection."""
         self.db.close()

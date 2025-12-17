@@ -259,3 +259,36 @@ class TestMemoryStorage:
         assert "by_project" in stats_all
         assert stats_all["by_project"]["project-a"] == 2
         assert stats_all["by_project"]["project-b"] == 1
+
+    def test_context_summary(self, storage):
+        """Test getting curated context summary."""
+        # Add various types of memories
+        storage.add(content="We decided to use PostgreSQL", memory_type="decision", project_id="my-project")
+        storage.add(content="User prefers dark mode", memory_type="preference", project_id="my-project")
+        storage.add(content="API runs on port 8080", memory_type="fact", project_id="my-project")
+        storage.add(content="Noticed high latency", memory_type="observation", project_id="my-project")
+        storage.add(content="Other project fact", memory_type="fact", project_id="other-project")
+
+        # Get context for my-project
+        result = storage.get_context_summary(project_id="my-project")
+
+        assert result["has_context"] is True
+        assert result["project_id"] == "my-project"
+        assert result["memory_count"] >= 4
+        assert "summary" in result
+        assert "PostgreSQL" in result["summary"]
+        assert "dark mode" in result["summary"]
+        assert "Other project" not in result["summary"]  # Should not include other project
+
+        # Verify priority ordering in summary (decisions should come before observations)
+        summary = result["summary"]
+        decision_pos = summary.find("PostgreSQL")
+        observation_pos = summary.find("latency")
+        assert decision_pos < observation_pos  # Decisions should appear before observations
+
+    def test_context_summary_empty(self, storage):
+        """Test context summary when no memories exist."""
+        result = storage.get_context_summary(project_id="nonexistent")
+
+        assert result["has_context"] is False
+        assert "No memories found" in result["summary"]

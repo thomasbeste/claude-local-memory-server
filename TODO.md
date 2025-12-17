@@ -6,6 +6,7 @@
 
 ## Table of Contents
 
+0. [KILLER FEATURE: Auto Context Injection](#0-killer-feature-auto-context-injection)
 1. [Critical: Storage Architecture](#1-critical-storage-architecture)
 2. [High Priority: Semantic Search](#2-high-priority-semantic-search)
 3. [High Priority: Scoping & Multi-tenancy](#3-high-priority-scoping--multi-tenancy)
@@ -13,6 +14,56 @@
 5. [Medium Priority: Auto-Summarization](#5-medium-priority-auto-summarization)
 6. [Low Priority: Quality of Life](#6-low-priority-quality-of-life)
 7. [Future Considerations](#7-future-considerations)
+
+---
+
+## 0. KILLER FEATURE: Auto Context Injection
+
+**The Problem:** Claude has to be *told* to remember and *asked* to recall. That's friction that kills adoption.
+
+**The Solution:** Automatically inject relevant context at session start. No user action required.
+
+### 0.1 Session Context Resource
+
+Expose an MCP resource that provides curated project context:
+
+- [x] Create `memory://context` resource that returns project summary
+- [x] Auto-detect project from git root
+- [x] Query recent memories (last 30 days, configurable)
+- [x] Prioritize by type: decisions > preferences > facts > observations
+- [x] Generate concise summary (organized by type)
+- [x] Include "last session" state if available
+
+### 0.2 Conversation Summarization
+
+Store conversation summaries, not just atomic facts:
+
+- [ ] Add `conversation_id` field to link related memories
+- [ ] Add `session` memory type for session summaries
+- [ ] Implement end-of-session summarization hook
+- [ ] Store: what was discussed, decisions made, open questions
+- [ ] Track "work in progress" state
+
+### 0.3 "Continue Where We Left Off"
+
+- [ ] Track incomplete tasks/discussions per project
+- [ ] Store "last active file" or "last topic" context
+- [ ] Generate "continuation prompt" on session start
+- [ ] Example: "Last time we were debugging auth middleware. The issue was in token refresh. Continue?"
+
+### 0.4 Proactive Memory Injection
+
+- [ ] Inject relevant memories into context before user asks
+- [ ] Trigger on: project switch, file open, topic detection
+- [ ] Smart filtering: don't inject stale or low-relevance memories
+- [ ] Configurable verbosity (minimal/normal/verbose)
+
+### 0.5 Contradiction Detection
+
+- [ ] Compare new facts against existing memories
+- [ ] Flag contradictions: "You said X before but now Y"
+- [ ] Prompt for resolution: update old memory or clarify
+- [ ] Track preference changes over time
 
 ---
 
@@ -356,15 +407,17 @@ Memories accumulate. Eventually you need synthesis, not just storage.
 
 | Feature | Impact | Effort | Priority | Status |
 |---------|--------|--------|----------|--------|
+| **Auto Context Injection** | **KILLER** | **Medium** | **P0** | DONE |
 | DuckDB Persistent Mode | High | Low | P0 | DONE |
 | Semantic Search (basic) | High | Medium | P0 | DONE |
 | Project Scoping | High | Low | P1 | DONE |
-| WAL/Event Sourcing | High | High | P1 | |
+| Docker Compose Support | Medium | Low | P1 | DONE |
+| Conversation Summaries | High | Medium | P1 | |
+| WAL/Event Sourcing | High | High | P2 | |
 | Knowledge Graph (basic) | Medium | Medium | P2 | |
 | Auto-Summarization | Medium | High | P2 | |
 | Web UI | Low | Medium | P3 | |
 | Distributed Sync | Medium | Very High | P3 | |
-| Docker Compose Support | Medium | Low | P1 | DONE |
 
 ---
 

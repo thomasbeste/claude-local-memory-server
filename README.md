@@ -137,6 +137,12 @@ claude-memory search -q "API framework" -m hybrid            # combined (default
 # Search across ALL projects
 claude-memory search -q "Python" --global
 
+# Get context summary for current project (prioritized decisions, preferences, facts)
+claude-memory context
+
+# Get context as JSON
+claude-memory context --json
+
 # Filter by type and tags
 claude-memory search --type decision --tags project:x
 

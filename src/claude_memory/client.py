@@ -7,7 +7,7 @@ import os
 import httpx
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import Tool, TextContent, Resource, ResourceContents, TextResourceContents
 
 
 def create_client_server(
@@ -160,7 +160,86 @@ def create_client_server(
                     "properties": {},
                 },
             ),
+            Tool(
+                name="memory_context",
+                description="Get a curated context summary for the current project. Use this at the start of a session to understand what you already know about this project.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project to get context for (uses current project if not specified)",
+                        },
+                        "max_memories": {
+                            "type": "integer",
+                            "description": "Maximum number of memories to include",
+                            "default": 10,
+                        },
+                        "days": {
+                            "type": "integer",
+                            "description": "Only include memories from the last N days",
+                            "default": 30,
+                        },
+                    },
+                },
+            ),
         ]
+
+    @server.list_resources()
+    async def list_resources() -> list[Resource]:
+        """List available memory resources."""
+        resources = []
+
+        if _project_id:
+            resources.append(
+                Resource(
+                    uri=f"memory://context/{_project_id}",
+                    name=f"Memory Context: {_project_id}",
+                    description=f"Curated context summary for project '{_project_id}'.",
+                    mimeType="text/markdown",
+                )
+            )
+
+        resources.append(
+            Resource(
+                uri="memory://context",
+                name="Memory Context (All Projects)",
+                description="Context summary across all projects.",
+                mimeType="text/markdown",
+            )
+        )
+
+        return resources
+
+    @server.read_resource()
+    async def read_resource(uri: str) -> ResourceContents:
+        """Read a memory resource by proxying to HTTP server."""
+        if uri.startswith("memory://context"):
+            parts = uri.split("/")
+            project = parts[3] if len(parts) > 3 else _project_id
+
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.get(
+                        f"{server_url}/context",
+                        headers=get_headers(),
+                        params={"project_id": project} if project else {},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    return TextResourceContents(
+                        uri=uri,
+                        mimeType="text/markdown",
+                        text=data.get("summary", "No context available."),
+                    )
+            except Exception as e:
+                return TextResourceContents(
+                    uri=uri,
+                    mimeType="text/markdown",
+                    text=f"Error fetching context: {str(e)}",
+                )
+
+        raise ValueError(f"Unknown resource: {uri}")
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
@@ -237,6 +316,24 @@ def create_client_server(
                     resp.raise_for_status()
                     stats = resp.json()
                     return [TextContent(type="text", text=json.dumps(stats, default=str, indent=2))]
+
+                elif name == "memory_context":
+                    params = {}
+                    if arguments.get("project_id"):
+                        params["project_id"] = arguments["project_id"]
+                    if arguments.get("max_memories"):
+                        params["max_memories"] = arguments["max_memories"]
+                    if arguments.get("days"):
+                        params["days"] = arguments["days"]
+
+                    resp = await client.get(
+                        f"{server_url}/context",
+                        headers=get_headers(),
+                        params=params,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    return [TextContent(type="text", text=data.get("summary", "No context available."))]
 
                 else:
                     return [TextContent(type="text", text=f"Unknown tool: {name}")]

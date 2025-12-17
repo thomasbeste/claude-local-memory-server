@@ -146,6 +146,44 @@ def show_project(ctx: click.Context) -> None:
         click.echo("Run from within a git repository to auto-detect, or use --project/-p flag.")
 
 
+@main.command()
+@click.option("--max", "-n", "max_memories", default=10, help="Maximum memories to include")
+@click.option("--days", "-d", default=30, help="Only include memories from last N days")
+@click.option("--json", "-j", "as_json", is_flag=True, help="Output as JSON")
+@click.option("--global", "-g", "global_context", is_flag=True, help="Get context across all projects")
+@click.pass_context
+def context(ctx: click.Context, max_memories: int, days: int, as_json: bool, global_context: bool) -> None:
+    """
+    Get curated context summary for the current project.
+
+    Shows prioritized memories (decisions, preferences, facts) suitable
+    for understanding the current state of a project.
+    """
+    storage: MemoryStorage = ctx.obj["storage"]
+    project_id = None if global_context else ctx.obj.get("project")
+
+    result = storage.get_context_summary(
+        project_id=project_id,
+        max_memories=max_memories,
+        days=days,
+    )
+
+    if as_json:
+        click.echo(json.dumps(result, default=str, indent=2))
+    else:
+        if not result.get("has_context"):
+            scope = "all projects" if global_context else f"project '{project_id}'" if project_id else "any project"
+            click.echo(f"No memories found for {scope}.")
+            return
+
+        click.echo(result["summary"])
+
+        if result.get("last_activity"):
+            last = result["last_activity"]
+            click.echo(f"\n---\nLast activity: {last['timestamp']}")
+            click.echo(f"Last memory: [{last['type']}] {last['last_memory'][:60]}...")
+
+
 @main.command("backfill-embeddings")
 @click.option("--batch-size", "-b", default=100, help="Batch size for processing")
 @click.pass_context

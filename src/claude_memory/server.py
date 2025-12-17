@@ -5,7 +5,7 @@ import json
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import Tool, TextContent, Resource, ResourceContents, TextResourceContents
 
 from .storage import MemoryStorage, get_current_project
 
@@ -147,7 +147,80 @@ def create_server(data_dir: str | None = None, client_id: str | None = None, pro
                     "properties": {},
                 },
             ),
+            Tool(
+                name="memory_context",
+                description="Get a curated context summary for the current project. Use this at the start of a session to understand what you already know about this project.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project to get context for (uses current project if not specified)",
+                        },
+                        "max_memories": {
+                            "type": "integer",
+                            "description": "Maximum number of memories to include",
+                            "default": 10,
+                        },
+                        "days": {
+                            "type": "integer",
+                            "description": "Only include memories from the last N days",
+                            "default": 30,
+                        },
+                    },
+                },
+            ),
         ]
+
+    @server.list_resources()
+    async def list_resources() -> list[Resource]:
+        """List available memory resources."""
+        resources = []
+
+        # Always provide a context resource for the current project
+        if _project_id:
+            resources.append(
+                Resource(
+                    uri=f"memory://context/{_project_id}",
+                    name=f"Memory Context: {_project_id}",
+                    description=f"Curated context summary for project '{_project_id}'. Contains recent decisions, preferences, and key facts.",
+                    mimeType="text/markdown",
+                )
+            )
+
+        # Also provide a global context resource
+        resources.append(
+            Resource(
+                uri="memory://context",
+                name="Memory Context (All Projects)",
+                description="Context summary across all projects.",
+                mimeType="text/markdown",
+            )
+        )
+
+        return resources
+
+    @server.read_resource()
+    async def read_resource(uri: str) -> ResourceContents:
+        """Read a memory resource."""
+        if uri.startswith("memory://context"):
+            # Extract project from URI if specified
+            parts = uri.split("/")
+            project = parts[3] if len(parts) > 3 else _project_id
+
+            context = storage.get_context_summary(
+                project_id=project,
+                max_memories=10,
+                days=30,
+            )
+
+            return TextResourceContents(
+                uri=uri,
+                mimeType="text/markdown",
+                text=context["summary"],
+            )
+
+        raise ValueError(f"Unknown resource: {uri}")
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
@@ -202,6 +275,15 @@ def create_server(data_dir: str | None = None, client_id: str | None = None, pro
             elif name == "memory_stats":
                 stats = storage.stats()
                 return [TextContent(type="text", text=json.dumps(stats, default=str, indent=2))]
+
+            elif name == "memory_context":
+                project = arguments.get("project_id") or _project_id
+                context = storage.get_context_summary(
+                    project_id=project,
+                    max_memories=arguments.get("max_memories", 10),
+                    days=arguments.get("days", 30),
+                )
+                return [TextContent(type="text", text=context["summary"])]
 
             else:
                 return [TextContent(type="text", text=f"Unknown tool: {name}")]

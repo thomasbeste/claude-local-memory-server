@@ -182,6 +182,29 @@ async def get_stats(
     return store.stats(project_id=effective_project)
 
 
+@app.get("/context")
+async def get_context(
+    project_id: str | None = None,
+    max_memories: int = 10,
+    days: int = 30,
+    x_project_id: Annotated[str | None, Header()] = None,
+    store: MemoryStorage = Depends(get_storage),
+    _: str | None = Depends(verify_api_key),
+):
+    """
+    Get curated context summary for a project.
+
+    Returns prioritized memories (decisions, preferences, facts) suitable
+    for injection at session start.
+    """
+    effective_project = project_id or x_project_id
+    return store.get_context_summary(
+        project_id=effective_project,
+        max_memories=max_memories,
+        days=days,
+    )
+
+
 # --- Entrypoint ---
 
 def create_app(data_dir: str = "/var/lib/claude-memory") -> FastAPI:

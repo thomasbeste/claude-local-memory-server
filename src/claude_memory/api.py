@@ -31,6 +31,7 @@ class SearchQuery(BaseModel):
     tags: list[str] | None = None
     client_id: str | None = None
     limit: int = 20
+    search_mode: str = "hybrid"  # "keyword", "semantic", "hybrid"
 
 
 # --- App setup ---
@@ -106,13 +107,14 @@ async def search_memories(
     store: MemoryStorage = Depends(get_storage),
     _: str | None = Depends(verify_api_key),
 ):
-    """Search memories."""
+    """Search memories. Supports keyword, semantic, and hybrid search modes."""
     results = store.search(
         query=query.query,
         memory_type=query.memory_type,
         tags=query.tags,
         client_id=query.client_id,
         limit=query.limit,
+        search_mode=query.search_mode,
     )
     return {"results": results, "count": len(results)}
 

@@ -39,24 +39,32 @@ def add(ctx: click.Context, content: str, memory_type: str, tags: tuple, source:
 @click.option("--type", "memory_type", help="Filter by type")
 @click.option("--tags", "-t", multiple=True, help="Filter by tags")
 @click.option("--limit", "-n", default=20, help="Max results")
+@click.option("--mode", "-m", default="hybrid", type=click.Choice(["keyword", "semantic", "hybrid"]),
+              help="Search mode: keyword (exact), semantic (meaning), hybrid (both)")
 @click.pass_context
-def search(ctx: click.Context, query: str | None, memory_type: str | None, tags: tuple, limit: int) -> None:
-    """Search memories."""
+def search(ctx: click.Context, query: str | None, memory_type: str | None, tags: tuple, limit: int, mode: str) -> None:
+    """Search memories with keyword, semantic, or hybrid search."""
     storage: MemoryStorage = ctx.obj["storage"]
     results = storage.search(
         query=query,
         memory_type=memory_type,
         tags=list(tags) if tags else None,
         limit=limit,
+        search_mode=mode,
     )
     if not results:
         click.echo("No memories found.")
         return
 
-    click.echo(f"Found {len(results)} memories:\n")
+    click.echo(f"Found {len(results)} memories (mode: {mode}):\n")
     for mem in results:
         tags_str = ", ".join(mem["tags"]) if mem["tags"] else "none"
-        click.echo(f"[{mem['id']}] ({mem['memory_type']}) {mem['content'][:80]}")
+        score_str = ""
+        if "score" in mem:
+            score_str = f" [score: {mem['score']:.3f}]"
+        elif "hybrid_score" in mem:
+            score_str = f" [hybrid: {mem['hybrid_score']:.4f}]"
+        click.echo(f"[{mem['id']}] ({mem['memory_type']}){score_str} {mem['content'][:80]}")
         click.echo(f"    tags: {tags_str} | {mem['created_at']}")
         click.echo()
 
@@ -80,6 +88,8 @@ def stats(ctx: click.Context) -> None:
     storage: MemoryStorage = ctx.obj["storage"]
     s = storage.stats()
     click.echo(f"Total memories: {s['total_memories']}")
+    click.echo(f"With embeddings: {s.get('memories_with_embeddings', 'N/A')}")
+    click.echo(f"Embeddings available: {s.get('embeddings_available', False)}")
     click.echo(f"Storage: {s['storage_path']}")
     if s["by_type"]:
         click.echo("\nBy type:")
@@ -89,6 +99,29 @@ def stats(ctx: click.Context) -> None:
         click.echo("\nBy client:")
         for c, count in s["by_client"].items():
             click.echo(f"  {c}: {count}")
+
+
+@main.command("backfill-embeddings")
+@click.option("--batch-size", "-b", default=100, help="Batch size for processing")
+@click.pass_context
+def backfill_embeddings(ctx: click.Context, batch_size: int) -> None:
+    """Generate embeddings for memories that don't have them."""
+    storage: MemoryStorage = ctx.obj["storage"]
+
+    # Check if embeddings are available
+    from .storage import Embedder
+    if not Embedder.is_available():
+        click.echo("Error: sentence-transformers not installed.", err=True)
+        click.echo("Install with: pip install claude-memory[embeddings]", err=True)
+        raise SystemExit(1)
+
+    click.echo("Backfilling embeddings for memories without them...")
+    result = storage.backfill_embeddings(batch_size=batch_size)
+
+    click.echo(f"Processed: {result['processed']}")
+    click.echo(f"Failed: {result['failed']}")
+    if result.get("error"):
+        click.echo(f"Error: {result['error']}", err=True)
 
 
 @main.command()

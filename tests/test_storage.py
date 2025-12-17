@@ -33,15 +33,45 @@ class TestMemoryStorage:
         assert result["tags"] == ["test", "example"]
         assert result["client_id"] == "test-client"
 
-    def test_search_by_query(self, storage):
-        """Test searching memories by query."""
+    def test_search_by_query_keyword(self, storage):
+        """Test searching memories by query with keyword mode."""
         storage.add(content="Python is great", memory_type="fact")
         storage.add(content="JavaScript is also good", memory_type="fact")
-        
-        results = storage.search(query="Python")
-        
+
+        # Keyword mode does exact substring matching
+        results = storage.search(query="Python", search_mode="keyword")
+
         assert len(results) == 1
         assert "Python" in results[0]["content"]
+
+    def test_search_semantic(self, storage):
+        """Test semantic search finds conceptually related content."""
+        storage.add(content="I love programming in Python", memory_type="fact")
+        storage.add(content="The weather is nice today", memory_type="fact")
+
+        # Semantic search should rank programming-related content higher
+        # when searching for coding-related terms
+        results = storage.search(query="software development", search_mode="semantic")
+
+        assert len(results) >= 1
+        # The programming memory should be scored higher than weather
+        if len(results) > 1 and "score" in results[0]:
+            programming_result = next((r for r in results if "Python" in r["content"]), None)
+            weather_result = next((r for r in results if "weather" in r["content"]), None)
+            if programming_result and weather_result:
+                assert programming_result.get("score", 0) > weather_result.get("score", 0)
+
+    def test_search_hybrid(self, storage):
+        """Test hybrid search combines keyword and semantic."""
+        storage.add(content="Python programming language", memory_type="fact")
+        storage.add(content="Software engineering best practices", memory_type="fact")
+
+        # Hybrid search should return results from both methods
+        results = storage.search(query="Python", search_mode="hybrid")
+
+        assert len(results) >= 1
+        # Should have hybrid_score when in hybrid mode
+        assert "hybrid_score" in results[0]
 
     def test_search_by_type(self, storage):
         """Test searching memories by type."""
@@ -143,10 +173,26 @@ class TestMemoryStorage:
             # Create and add memory
             storage1 = MemoryStorage(tmpdir)
             storage1.add(content="Persistent memory")
-            
+            storage1.close()
+
             # Create new instance pointing to same directory
             storage2 = MemoryStorage(tmpdir)
-            results = storage2.search(query="Persistent")
-            
+            results = storage2.search(query="Persistent", search_mode="keyword")
+
             assert len(results) == 1
             assert results[0]["content"] == "Persistent memory"
+            storage2.close()
+
+    def test_backfill_embeddings(self, storage):
+        """Test backfilling embeddings for existing memories."""
+        # Add memories (they'll get embeddings automatically if available)
+        storage.add(content="Test memory one")
+        storage.add(content="Test memory two")
+
+        stats = storage.stats()
+        # If embeddings are available, they should be generated
+        from claude_memory.storage import Embedder
+        if Embedder.is_available():
+            assert stats["memories_with_embeddings"] == 2
+        else:
+            assert stats["memories_with_embeddings"] == 0

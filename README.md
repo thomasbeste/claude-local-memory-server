@@ -2,7 +2,7 @@
 
 **Persistent, shared memory for Claude Code via MCP**
 
-A lightweight memory server that gives Claude Code durable, searchable memory across machines. Built with DuckDB and Parquet for efficient storage and fast queries.
+A lightweight memory server that gives Claude Code durable, searchable memory across machines. Built with DuckDB for efficient storage with semantic search powered by sentence-transformers.
 
 ```
 ┌─────────────────┐     ┌─────────────────┐
@@ -21,9 +21,11 @@ A lightweight memory server that gives Claude Code durable, searchable memory ac
 
 ## Features
 
-- **Persistent storage** – Memories survive restarts, stored in Parquet format
+- **Persistent storage** – Memories survive restarts, stored in DuckDB
+- **Semantic search** – Find memories by meaning, not just keywords
+- **Hybrid search** – Combines keyword matching with vector similarity (RRF)
 - **Shared across machines** – Run a central server, connect from anywhere
-- **Fast queries** – DuckDB-powered search, not full-scan
+- **Fast queries** – DuckDB-powered with automatic indexing
 - **Client tracking** – Know which machine created each memory
 - **Tag-based organization** – Filter by project, tech stack, or custom tags
 - **Simple setup** – One script installs everything on Debian/Ubuntu
@@ -91,16 +93,34 @@ Once configured, Claude can store and retrieve memories:
 # Add a memory
 claude-memory add "Project X uses Python 3.12" --type fact --tags project:x
 
-# Search memories
+# Search memories (default: hybrid mode)
 claude-memory search --query "Python"
+
+# Search with specific mode
+claude-memory search -q "software development" -m semantic  # meaning-based
+claude-memory search -q "Python" -m keyword                  # exact matching
+claude-memory search -q "API framework" -m hybrid            # combined (default)
+
+# Filter by type and tags
 claude-memory search --type decision --tags project:x
 
 # View statistics
 claude-memory stats
 
+# Backfill embeddings for existing memories
+claude-memory backfill-embeddings
+
 # Delete a memory
 claude-memory delete <memory-id>
 ```
+
+### Search Modes
+
+| Mode | Description |
+|------|-------------|
+| `keyword` | Traditional substring matching (ILIKE) |
+| `semantic` | Vector similarity using sentence-transformers |
+| `hybrid` | Combines both with Reciprocal Rank Fusion (default) |
 
 ## Memory Types
 
@@ -157,22 +177,32 @@ src/claude_memory/
 └── cli.py       # Command-line interface
 ```
 
-**Local mode:** Claude Code ↔ stdio ↔ `server.py` ↔ DuckDB ↔ Parquet file
+**Local mode:** Claude Code ↔ stdio ↔ `server.py` ↔ DuckDB
 
-**Server mode:** Claude Code ↔ stdio ↔ `client.py` ↔ HTTP ↔ `api.py` ↔ DuckDB ↔ Parquet file
+**Server mode:** Claude Code ↔ stdio ↔ `client.py` ↔ HTTP ↔ `api.py` ↔ DuckDB
 
 ## Data Storage
 
-Memories are stored in a single Parquet file:
-- **Server:** `/var/lib/claude-memory/memories.parquet`
-- **Local:** `~/.claude-memory/memories.parquet`
+Memories are stored in a persistent DuckDB database:
+- **Server:** `/var/lib/claude-memory/memories.duckdb`
+- **Local:** `~/.claude-memory/memories.duckdb`
+
+The database includes embeddings for semantic search (384-dimensional vectors from `all-MiniLM-L6-v2`).
 
 Inspect with DuckDB:
 ```bash
-duckdb -c "SELECT * FROM '~/.claude-memory/memories.parquet' LIMIT 10"
+duckdb ~/.claude-memory/memories.duckdb -c "SELECT id, content, memory_type FROM memories LIMIT 10"
 ```
 
-Backup:
+Export to Parquet (for backup):
+```bash
+# From Python
+from claude_memory.storage import MemoryStorage
+storage = MemoryStorage()
+storage.export_parquet("/path/to/backup.parquet")
+```
+
+Backup script:
 ```bash
 ./scripts/backup.sh  # Creates timestamped backup in /var/backups/claude-memory/
 ```
@@ -185,7 +215,7 @@ git clone https://github.com/YOUR_USERNAME/claude-memory.git
 cd claude-memory
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev,server]"
+pip install -e ".[dev,server,embeddings]"
 
 # Run tests
 pytest
@@ -194,13 +224,28 @@ pytest
 ruff check src/
 ```
 
+### Optional Dependencies
+
+| Extra | Description |
+|-------|-------------|
+| `server` | FastAPI + uvicorn for HTTP server mode |
+| `embeddings` | sentence-transformers for semantic search |
+| `dev` | pytest + ruff for development |
+| `all` | Everything above |
+
 ## Roadmap
 
-- [ ] Semantic search with embeddings
+- [x] Semantic search with embeddings
+- [x] Hybrid search (keyword + semantic)
+- [x] DuckDB persistent mode
 - [ ] Web UI for browsing memories
 - [ ] Memory expiration/TTL
 - [ ] User/project scoping
+- [ ] Knowledge graph relationships
+- [ ] Auto-summarization
 - [ ] Prometheus metrics endpoint
+
+See [TODO.md](TODO.md) for the full roadmap.
 
 ## License
 

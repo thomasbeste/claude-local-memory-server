@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -53,7 +52,7 @@ def create_server(data_dir: str | None = None, client_id: str | None = None) -> 
             ),
             Tool(
                 name="memory_search",
-                description="Search through stored memories. Use this to recall information from previous conversations.",
+                description="Search through stored memories. Use this to recall information from previous conversations. Supports semantic search for finding conceptually related memories.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -79,6 +78,12 @@ def create_server(data_dir: str | None = None, client_id: str | None = None) -> 
                             "type": "integer",
                             "description": "Max results to return",
                             "default": 20,
+                        },
+                        "search_mode": {
+                            "type": "string",
+                            "enum": ["keyword", "semantic", "hybrid"],
+                            "description": "Search mode: 'keyword' for exact matching, 'semantic' for meaning-based search, 'hybrid' combines both (default)",
+                            "default": "hybrid",
                         },
                     },
                 },
@@ -151,6 +156,7 @@ def create_server(data_dir: str | None = None, client_id: str | None = None) -> 
                     tags=arguments.get("tags"),
                     client_id=arguments.get("client_id"),
                     limit=arguments.get("limit", 20),
+                    search_mode=arguments.get("search_mode", "hybrid"),
                 )
                 if not results:
                     return [TextContent(type="text", text="No memories found matching the criteria.")]

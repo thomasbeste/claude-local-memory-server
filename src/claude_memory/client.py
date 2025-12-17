@@ -58,7 +58,7 @@ def create_client_server(server_url: str, api_key: str | None = None, client_id:
             ),
             Tool(
                 name="memory_search",
-                description="Search through stored memories. Use this to recall information from previous conversations.",
+                description="Search through stored memories. Use this to recall information from previous conversations. Supports semantic search for finding conceptually related memories.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -84,6 +84,12 @@ def create_client_server(server_url: str, api_key: str | None = None, client_id:
                             "type": "integer",
                             "description": "Max results to return",
                             "default": 20,
+                        },
+                        "search_mode": {
+                            "type": "string",
+                            "enum": ["keyword", "semantic", "hybrid"],
+                            "description": "Search mode: 'keyword' for exact matching, 'semantic' for meaning-based search, 'hybrid' combines both (default)",
+                            "default": "hybrid",
                         },
                     },
                 },
@@ -165,6 +171,7 @@ def create_client_server(server_url: str, api_key: str | None = None, client_id:
                             "tags": arguments.get("tags"),
                             "client_id": arguments.get("client_id"),
                             "limit": arguments.get("limit", 20),
+                            "search_mode": arguments.get("search_mode", "hybrid"),
                         },
                     )
                     resp.raise_for_status()

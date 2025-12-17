@@ -8,7 +8,7 @@ __all__ = ["MemoryStorage", "create_server", "run"]
 
 # Optional imports for server mode
 try:
-    from .api import app, create_app, run_server
+    from .api import app, create_app, run_server  # noqa: F401
     __all__.extend(["app", "create_app", "run_server"])
 except ImportError:
     pass  # Server dependencies not installed

@@ -371,6 +371,75 @@ Backup script:
 ./scripts/backup.sh  # Creates timestamped backup in /var/backups/claude-local-memory-server/
 ```
 
+## Using Hooks for Automatic Context
+
+Claude Code supports [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) — shell commands that run in response to events. You can use hooks to automatically inject memory context at the start of every conversation.
+
+### Auto-inject Project Context
+
+Create `.claude/settings.json` in your project (or `~/.claude/settings.json` globally):
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-memory context --json 2>/dev/null | jq -r '\"[Memory Context for \" + .project_id + \"]\\n\" + (.memories | map(\"- [\" + .memory_type + \"] \" + .content) | join(\"\\n\"))' 2>/dev/null || echo ''",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+This runs on every prompt submission and prepends relevant memories to your conversation. The empty `matcher` means it runs on all prompts.
+
+### Simpler Hook (No jq Required)
+
+If you don't have `jq` installed:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-memory context 2>/dev/null || echo ''",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Hook Tips
+
+- **Timeout**: Set a reasonable timeout (5000ms) so slow network doesn't block your conversation
+- **Error handling**: The `|| echo ''` ensures Claude Code doesn't choke on errors
+- **Stderr redirect**: `2>/dev/null` suppresses connection warnings
+- **Project scoping**: `claude-memory context` automatically detects your git project and returns only relevant memories
+
+### Other Hook Ideas
+
+| Event | Use Case |
+|-------|----------|
+| `PreToolUse` | Log when Claude is about to store a memory |
+| `PostToolUse` | Trigger notifications after memory operations |
+| `Stop` | Summarize what was remembered in the session |
+
+See the [Claude Code hooks documentation](https://docs.anthropic.com/en/docs/claude-code/hooks) for the full event reference.
+
 ## Development
 
 ```bash

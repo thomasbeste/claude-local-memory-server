@@ -29,6 +29,7 @@ A lightweight memory server that gives Claude Code durable, searchable memory ac
 - **Fast queries** – DuckDB-powered with automatic indexing
 - **Client tracking** – Know which machine created each memory
 - **Tag-based organization** – Filter by project, tech stack, or custom tags
+- **Production ready** – Rate limiting, request logging, CORS support
 - **Simple setup** – One script installs everything on Debian/Ubuntu
 
 ## Quick Start
@@ -69,6 +70,16 @@ docker compose up -d
 # Check status
 docker compose logs -f
 ```
+
+**HTTP MCP Mode (direct connection):**
+
+The server exposes an MCP-over-HTTP endpoint at `/mcp`. Configure Claude Code to connect directly:
+
+```bash
+claude mcp add memory --transport http --url http://your-server:8420/mcp
+```
+
+This eliminates the need for a local client process — Claude Code connects directly to the server via HTTP.
 
 ### Option 3: Server Mode with Systemd (LXC/VM)
 
@@ -182,12 +193,21 @@ claude-memory delete <memory-id>
 
 ### Environment Variables
 
+**Client variables:**
+
 | Variable | Description |
 |----------|-------------|
 | `MEMORY_SERVER` | HTTP server URL (client mode) |
 | `MEMORY_API_KEY` | API key for authentication |
 | `MEMORY_CLIENT_ID` | Identifier for this client (e.g., "laptop", "work-pc") |
 | `MEMORY_PROJECT` | Override auto-detected project ID |
+
+**Server variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `MEMORY_API_KEY` | API key for authentication (required for production) |
+| `CORS_ORIGINS` | Comma-separated allowed origins (e.g., `https://ui.example.com`) |
 
 ### Server Options
 
@@ -223,20 +243,107 @@ Options:
   --no-service        Don't install systemd service
 ```
 
+## Deploying Behind a Reverse Proxy
+
+The server is designed to be exposed over the internet behind nginx or another reverse proxy. It includes:
+
+- **API key authentication** – All routes (except `/health`) require `X-API-Key` header
+- **Rate limiting** – 30/min for writes, 60/min for reads (per API key)
+- **Request logging** – Every request logged with timing, IP, and API key hint
+- **CORS support** – Configurable via `CORS_ORIGINS` environment variable
+
+### Nginx Configuration
+
+```nginx
+# Rate limiting zone (optional, server has built-in limits)
+limit_req_zone $binary_remote_addr zone=memory_api:10m rate=10r/s;
+
+server {
+    listen 443 ssl http2;
+    server_name memory.yourdomain.com;
+
+    ssl_certificate /etc/letsencrypt/live/memory.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/memory.yourdomain.com/privkey.pem;
+
+    # Security headers
+    add_header X-Content-Type-Options nosniff;
+    add_header X-Frame-Options DENY;
+
+    location / {
+        proxy_pass http://127.0.0.1:8420;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Optional: nginx-level rate limiting
+        limit_req zone=memory_api burst=20 nodelay;
+
+        # Request size limit (prevent memory bombs)
+        client_max_body_size 1m;
+    }
+
+    # Health check (no auth required)
+    location /health {
+        proxy_pass http://127.0.0.1:8420/health;
+    }
+}
+
+# Redirect HTTP to HTTPS
+server {
+    listen 80;
+    server_name memory.yourdomain.com;
+    return 301 https://$server_name$request_uri;
+}
+```
+
+### Rate Limits
+
+Built-in rate limits per API key (or IP if no key):
+
+| Operation | Limit |
+|-----------|-------|
+| Create memory | 30/minute |
+| Update memory | 30/minute |
+| Delete memory | 30/minute |
+| Search | 60/minute |
+| Get memory | 60/minute |
+| Stats/Context | 60/minute |
+
+When rate limited, the server returns `429 Too Many Requests`.
+
+### Request Logging
+
+All requests are logged in this format:
+
+```
+2025-12-18 12:34:56 | claude_memory.api | INFO | POST /memories | 201 | 45.2ms | ip=192.168.1.5 key=abc12345...
+```
+
+Logs include:
+- Timestamp
+- HTTP method and path
+- Response status code
+- Request duration
+- Client IP address
+- First 8 characters of API key (for debugging without exposing full key)
+
 ## Architecture
 
 ```
 src/claude_memory/
 ├── storage.py   # DuckDB/Parquet storage layer
 ├── server.py    # MCP stdio server (local mode)
-├── api.py       # FastAPI HTTP server (server mode)
+├── api.py       # FastAPI HTTP server + MCP-over-HTTP endpoint
 ├── client.py    # MCP stdio client → HTTP proxy
 └── cli.py       # Command-line interface
 ```
 
 **Local mode:** Claude Code ↔ stdio ↔ `server.py` ↔ DuckDB
 
-**Server mode:** Claude Code ↔ stdio ↔ `client.py` ↔ HTTP ↔ `api.py` ↔ DuckDB
+**Client mode:** Claude Code ↔ stdio ↔ `client.py` ↔ HTTP REST ↔ `api.py` ↔ DuckDB
+
+**HTTP MCP mode:** Claude Code ↔ HTTP MCP ↔ `api.py` `/mcp` endpoint ↔ DuckDB
 
 ## Data Storage
 
@@ -295,9 +402,11 @@ ruff check src/
 - [x] Semantic search with embeddings
 - [x] Hybrid search (keyword + semantic)
 - [x] DuckDB persistent mode
+- [x] Rate limiting and request logging
+- [x] Production-ready for reverse proxy deployment
+- [x] MCP-over-HTTP endpoint (direct Claude Code connection)
 - [ ] Web UI for browsing memories
 - [ ] Memory expiration/TTL
-- [ ] User/project scoping
 - [ ] Knowledge graph relationships
 - [ ] Auto-summarization
 - [ ] Prometheus metrics endpoint

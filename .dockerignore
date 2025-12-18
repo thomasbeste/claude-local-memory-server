@@ -45,3 +45,4 @@ scripts/
 # Docs
 *.md
 !README.md
+!LICENSE

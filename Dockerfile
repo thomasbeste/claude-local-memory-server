@@ -3,21 +3,23 @@
 # Build: docker build -t claude-local-memory-server .
 # Run:   docker run -d -p 8420:8420 -v claude-local-memory-server-data:/data claude-local-memory-server
 
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+COPY pyproject.toml README.md LICENSE ./
+COPY src/ ./src/
+
+RUN pip install --no-cache-dir ".[server]"
+
+# Runtime stage
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system deps for sentence-transformers (optional but recommended)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy project files
-COPY pyproject.toml README.md ./
-COPY src/ ./src/
-
-# Install with server + embeddings support
-RUN pip install --no-cache-dir -e ".[server,embeddings]"
+# Copy installed packages from builder
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /app /app
 
 # Create data directory
 RUN mkdir -p /data

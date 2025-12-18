@@ -414,6 +414,7 @@ Memories accumulate. Eventually you need synthesis, not just storage.
 | Project Scoping | High | Low | P1 | DONE |
 | Docker Compose Support | Medium | Low | P1 | DONE |
 | Conversation Summaries | High | Medium | P1 | DONE |
+| HTTP MCP Endpoint | High | Medium | P1 | DONE |
 | WAL/Event Sourcing | High | High | P2 | |
 | Knowledge Graph (basic) | Medium | Medium | P2 | |
 | Auto-Summarization | Medium | High | P2 | |
@@ -432,6 +433,7 @@ Memories accumulate. Eventually you need synthesis, not just storage.
 6. Add Prometheus metrics endpoint
 7. Create backup rotation in backup.sh
 8. ~~Add Docker Compose support~~ DONE
+9. ~~Add MCP-over-HTTP endpoint (StreamableHTTPSessionManager)~~ DONE
 
 ---
 

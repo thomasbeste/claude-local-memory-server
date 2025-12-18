@@ -46,6 +46,8 @@ Issues = "https://github.com/thomasbeste/claude-local-memory-server/issues"
 server = [
     "fastapi>=0.115.0",
     "uvicorn>=0.30.0",
+    "slowapi>=0.1.9",
+    "sse-starlette>=2.0.0",
 ]
 embeddings = [
     "sentence-transformers>=3.0.0",

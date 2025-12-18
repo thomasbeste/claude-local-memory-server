@@ -24,8 +24,9 @@ def main(ctx: click.Context, data_dir: str, project: str | None) -> None:
 @click.option("--tags", "-t", multiple=True, help="Tags (can be repeated)")
 @click.option("--source", "-s", help="Source/context")
 @click.option("--no-project", is_flag=True, help="Don't associate with current project")
+@click.option("--no-duplicate-check", is_flag=True, help="Skip duplicate detection")
 @click.pass_context
-def add(ctx: click.Context, content: str, memory_type: str, tags: tuple, source: str | None, no_project: bool) -> None:
+def add(ctx: click.Context, content: str, memory_type: str, tags: tuple, source: str | None, no_project: bool, no_duplicate_check: bool) -> None:
     """Add a new memory."""
     storage: MemoryStorage = ctx.obj["storage"]
     project_id = None if no_project else ctx.obj.get("project")
@@ -36,11 +37,22 @@ def add(ctx: click.Context, content: str, memory_type: str, tags: tuple, source:
         tags=list(tags) if tags else None,
         source=source,
         project_id=project_id,
+        check_duplicates=not no_duplicate_check,
     )
+
     click.echo(f"Added memory: {result['id']}")
     if project_id:
         click.echo(f"Project: {project_id}")
-    click.echo(json.dumps(result, default=str, indent=2))
+
+    # Show duplicate warning if found
+    if result.get("similar_memories"):
+        click.echo(click.style(f"\n⚠️  {result['duplicate_warning']}:", fg="yellow"))
+        for sim in result["similar_memories"]:
+            click.echo(f"  [{sim['id']}] {sim['similarity']:.1%} similar: {sim['content'][:50]}...")
+
+    # Don't print full JSON if duplicates shown (too noisy)
+    if not result.get("similar_memories"):
+        click.echo(json.dumps(result, default=str, indent=2))
 
 
 @main.command()
@@ -182,6 +194,36 @@ def context(ctx: click.Context, max_memories: int, days: int, as_json: bool, glo
             last = result["last_activity"]
             click.echo(f"\n---\nLast activity: {last['timestamp']}")
             click.echo(f"Last memory: [{last['type']}] {last['last_memory'][:60]}...")
+
+
+@main.command("similar")
+@click.argument("content")
+@click.option("--threshold", "-t", default=0.85, help="Similarity threshold (0-1)")
+@click.option("--limit", "-n", default=5, help="Maximum results")
+@click.option("--global", "-g", "global_search", is_flag=True, help="Search across all projects")
+@click.pass_context
+def find_similar(ctx: click.Context, content: str, threshold: float, limit: int, global_search: bool) -> None:
+    """Find memories similar to the given content."""
+    storage: MemoryStorage = ctx.obj["storage"]
+    project_id = None if global_search else ctx.obj.get("project")
+
+    results = storage.find_similar(
+        content=content,
+        project_id=project_id,
+        threshold=threshold,
+        limit=limit,
+    )
+
+    if not results:
+        click.echo("No similar memories found.")
+        return
+
+    click.echo(f"Found {len(results)} similar memories:\n")
+    for mem in results:
+        click.echo(f"[{mem['id']}] {mem['similarity']:.1%} similar")
+        click.echo(f"  {mem['content'][:80]}...")
+        click.echo(f"  type: {mem['memory_type']} | project: {mem.get('project_id', 'none')}")
+        click.echo()
 
 
 @main.command("backfill-embeddings")

@@ -292,3 +292,53 @@ class TestMemoryStorage:
 
         assert result["has_context"] is False
         assert "No memories found" in result["summary"]
+
+    def test_find_similar(self, storage):
+        """Test finding similar memories."""
+        # Add some memories
+        storage.add(content="Python is a great programming language", project_id="test")
+        storage.add(content="JavaScript is used for web development", project_id="test")
+        storage.add(content="Python is an excellent language for coding", project_id="test")
+
+        # Find similar to Python content
+        results = storage.find_similar(
+            content="Python programming is awesome",
+            project_id="test",
+            threshold=0.5,
+        )
+
+        # Should find the Python-related memories with higher similarity
+        assert len(results) >= 1
+        # The most similar should be about Python
+        assert "Python" in results[0]["content"]
+
+    def test_duplicate_detection_on_add(self, storage):
+        """Test that adding similar memories triggers duplicate warning."""
+        # Add initial memory
+        storage.add(content="We use PostgreSQL for the database", project_id="test")
+
+        # Add very similar memory
+        result = storage.add(
+            content="We use PostgreSQL as our database",
+            project_id="test",
+            check_duplicates=True,
+            duplicate_threshold=0.8,
+        )
+
+        # Should have found the similar memory
+        assert "similar_memories" in result or "duplicate_warning" in result
+
+    def test_skip_duplicate_check(self, storage):
+        """Test that duplicate check can be skipped."""
+        storage.add(content="Test memory one", project_id="test")
+
+        # Add with duplicate check disabled
+        result = storage.add(
+            content="Test memory one",  # Exact same content
+            project_id="test",
+            check_duplicates=False,
+        )
+
+        # Should not have duplicate warning
+        assert "similar_memories" not in result
+        assert "duplicate_warning" not in result

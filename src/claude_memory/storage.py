@@ -224,6 +224,58 @@ class MemoryStorage:
         except Exception as e:
             logger.error(f"Failed to migrate from parquet: {e}")
 
+    def find_similar(
+        self,
+        content: str,
+        project_id: str | None = None,
+        threshold: float = 0.85,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """
+        Find memories similar to the given content using embedding similarity.
+
+        Args:
+            content: Text to find similar memories for
+            project_id: Limit search to specific project
+            threshold: Minimum similarity score (0-1, default 0.85)
+            limit: Maximum results to return
+
+        Returns:
+            List of similar memories with similarity scores
+        """
+        if not Embedder.is_available():
+            return []
+
+        embedding = self.embedder.embed(content)
+        if embedding is None:
+            return []
+
+        conditions = ["embedding IS NOT NULL"]
+        params: list = []
+
+        if project_id:
+            conditions.append("project_id = ?")
+            params.append(project_id)
+
+        where_clause = " AND ".join(conditions)
+
+        result = self.db.execute(
+            f"""
+            SELECT
+                id, content, memory_type, tags, project_id, created_at,
+                list_cosine_similarity(embedding, ?::FLOAT[]) as similarity
+            FROM memories
+            WHERE {where_clause}
+            AND list_cosine_similarity(embedding, ?::FLOAT[]) > ?
+            ORDER BY similarity DESC
+            LIMIT ?
+            """,
+            [embedding] + params + [embedding, threshold, limit],
+        ).fetchall()
+
+        columns = ["id", "content", "memory_type", "tags", "project_id", "created_at", "similarity"]
+        return [dict(zip(columns, row)) for row in result]
+
     def add(
         self,
         content: str,
@@ -232,11 +284,33 @@ class MemoryStorage:
         source: str | None = None,
         client_id: str | None = None,
         project_id: str | None = None,
+        check_duplicates: bool = True,
+        duplicate_threshold: float = 0.85,
     ) -> dict[str, Any]:
-        """Add a new memory with optional embedding."""
+        """
+        Add a new memory with optional embedding and duplicate detection.
+
+        Args:
+            content: Memory content
+            memory_type: Type of memory
+            tags: Optional tags
+            source: Optional source
+            client_id: Client identifier
+            project_id: Project identifier
+            check_duplicates: Whether to check for similar existing memories
+            duplicate_threshold: Similarity threshold for duplicate detection (0-1)
+
+        Returns:
+            Dict with memory info and any duplicate warnings
+        """
         memory_id = str(uuid.uuid4())[:8]
         now = datetime.now(timezone.utc)
         tags = tags or []
+
+        # Check for duplicates before adding
+        duplicates = []
+        if check_duplicates:
+            duplicates = self.find_similar(content, project_id, duplicate_threshold, limit=3)
 
         # Generate embedding if available
         embedding = self.embedder.embed(content)
@@ -249,7 +323,7 @@ class MemoryStorage:
             [memory_id, content, memory_type, tags, source, client_id, project_id, now, now, embedding],
         )
 
-        return {
+        result = {
             "id": memory_id,
             "content": content,
             "memory_type": memory_type,
@@ -260,6 +334,12 @@ class MemoryStorage:
             "created_at": now.isoformat(),
             "has_embedding": embedding is not None,
         }
+
+        if duplicates:
+            result["similar_memories"] = duplicates
+            result["duplicate_warning"] = f"Found {len(duplicates)} similar memories"
+
+        return result
 
     def search(
         self,

@@ -427,7 +427,7 @@ Memories accumulate. Eventually you need synthesis, not just storage.
 2. ~~Add `project_id` column and basic filtering~~ DONE
 3. ~~Integrate sentence-transformers for embedding generation~~ DONE
 4. ~~Add `--project` flag to CLI commands~~ DONE
-5. Implement basic duplicate detection
+5. ~~Implement basic duplicate detection~~ DONE
 6. Add Prometheus metrics endpoint
 7. Create backup rotation in backup.sh
 8. ~~Add Docker Compose support~~ DONE

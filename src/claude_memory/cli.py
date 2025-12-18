@@ -111,6 +111,70 @@ def delete(ctx: click.Context, memory_id: str) -> None:
 
 
 @main.command()
+@click.option("--project", "-p", "project_id", help="Delete only memories from this project")
+@click.option("--type", "-t", "memory_type", help="Delete only memories of this type")
+@click.option("--older-than", "-o", "older_than_days", type=int, help="Delete memories older than N days")
+@click.option("--tags", multiple=True, help="Delete memories with any of these tags")
+@click.option("--contains", "-c", "content_contains", help="Delete memories containing this text")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+@click.pass_context
+def purge(ctx: click.Context, project_id: str | None, memory_type: str | None,
+          older_than_days: int | None, tags: tuple, content_contains: str | None, yes: bool) -> None:
+    """
+    Delete multiple memories matching filter criteria.
+
+    At least one filter is required to prevent accidental deletion.
+
+    Examples:
+        claude-memory purge --type fact
+        claude-memory purge --project myproject --older-than 30
+        claude-memory purge --contains "test" --yes
+    """
+    storage: MemoryStorage = ctx.obj["storage"]
+
+    # Convert tags tuple to list
+    tags_list = list(tags) if tags else None
+
+    # Check if any filter is specified
+    if not any([project_id, memory_type, older_than_days, tags_list, content_contains]):
+        click.echo("Error: At least one filter is required.", err=True)
+        click.echo("Use --project, --type, --older-than, --tags, or --contains", err=True)
+        raise SystemExit(1)
+
+    # Build filter description for confirmation
+    filters = []
+    if project_id:
+        filters.append(f"project = '{project_id}'")
+    if memory_type:
+        filters.append(f"type = '{memory_type}'")
+    if older_than_days:
+        filters.append(f"older than {older_than_days} days")
+    if tags_list:
+        filters.append(f"tags in {tags_list}")
+    if content_contains:
+        filters.append(f"content contains '{content_contains}'")
+
+    # Count matching memories first
+    result = storage.purge(
+        project_id=project_id,
+        memory_type=memory_type,
+        older_than_days=older_than_days,
+        tags=tags_list,
+        content_contains=content_contains,
+    )
+
+    if result.get("error"):
+        click.echo(f"Error: {result['error']}", err=True)
+        raise SystemExit(1)
+
+    if result["deleted"] == 0:
+        click.echo("No memories matched the filter criteria.")
+        return
+
+    click.echo(f"Deleted {result['deleted']} memories matching: {', '.join(filters)}")
+
+
+@main.command()
 @click.option("--global", "-g", "global_stats", is_flag=True, help="Show stats for all projects")
 @click.pass_context
 def stats(ctx: click.Context, global_stats: bool) -> None:

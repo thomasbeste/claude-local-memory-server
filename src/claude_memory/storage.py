@@ -592,6 +592,87 @@ class MemoryStorage:
         after = self.db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
         return before > after
 
+    def purge(
+        self,
+        project_id: str | None = None,
+        memory_type: str | None = None,
+        older_than_days: int | None = None,
+        tags: list[str] | None = None,
+        content_contains: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Purge memories matching filter criteria.
+
+        At least one filter must be specified to prevent accidental deletion of all memories.
+
+        Args:
+            project_id: Delete only memories from this project
+            memory_type: Delete only memories of this type
+            older_than_days: Delete memories older than N days
+            tags: Delete memories that have any of these tags
+            content_contains: Delete memories where content contains this string (case-insensitive)
+
+        Returns:
+            Dict with count of deleted memories and any errors
+        """
+        from datetime import timedelta
+
+        # Safety check: require at least one filter
+        if not any([project_id, memory_type, older_than_days, tags, content_contains]):
+            return {
+                "deleted": 0,
+                "error": "At least one filter is required. Use project_id, memory_type, older_than_days, tags, or content_contains.",
+            }
+
+        conditions = []
+        params: list = []
+
+        if project_id:
+            conditions.append("project_id = ?")
+            params.append(project_id)
+
+        if memory_type:
+            conditions.append("memory_type = ?")
+            params.append(memory_type)
+
+        if older_than_days is not None:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+            conditions.append("created_at < ?")
+            params.append(cutoff)
+
+        if tags:
+            conditions.append("len(list_intersect(tags, ?)) > 0")
+            params.append(tags)
+
+        if content_contains:
+            conditions.append("content ILIKE ?")
+            params.append(f"%{content_contains}%")
+
+        where_clause = " AND ".join(conditions)
+
+        # First, get count of what will be deleted (for confirmation)
+        count = self.db.execute(
+            f"SELECT COUNT(*) FROM memories WHERE {where_clause}",
+            params,
+        ).fetchone()[0]
+
+        if count == 0:
+            return {"deleted": 0, "message": "No memories matched the filter criteria"}
+
+        # Perform the deletion
+        self.db.execute(f"DELETE FROM memories WHERE {where_clause}", params)
+
+        return {
+            "deleted": count,
+            "filters_applied": {
+                "project_id": project_id,
+                "memory_type": memory_type,
+                "older_than_days": older_than_days,
+                "tags": tags,
+                "content_contains": content_contains,
+            },
+        }
+
     def update(
         self,
         memory_id: str,

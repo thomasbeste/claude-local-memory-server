@@ -170,6 +170,37 @@ def create_server(data_dir: str | None = None, client_id: str | None = None, pro
                     },
                 },
             ),
+            Tool(
+                name="memory_purge",
+                description="Delete multiple memories matching filter criteria. Requires at least one filter to prevent accidental deletion.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "Delete only memories from this project",
+                        },
+                        "memory_type": {
+                            "type": "string",
+                            "enum": ["fact", "decision", "preference", "observation", "entity", "relation", "session"],
+                            "description": "Delete only memories of this type",
+                        },
+                        "older_than_days": {
+                            "type": "integer",
+                            "description": "Delete memories older than N days",
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Delete memories that have any of these tags",
+                        },
+                        "content_contains": {
+                            "type": "string",
+                            "description": "Delete memories where content contains this string (case-insensitive)",
+                        },
+                    },
+                },
+            ),
         ]
 
     @server.list_resources()
@@ -284,6 +315,16 @@ def create_server(data_dir: str | None = None, client_id: str | None = None, pro
                     days=arguments.get("days", 30),
                 )
                 return [TextContent(type="text", text=context["summary"])]
+
+            elif name == "memory_purge":
+                result = storage.purge(
+                    project_id=arguments.get("project_id"),
+                    memory_type=arguments.get("memory_type"),
+                    older_than_days=arguments.get("older_than_days"),
+                    tags=arguments.get("tags"),
+                    content_contains=arguments.get("content_contains"),
+                )
+                return [TextContent(type="text", text=json.dumps(result, default=str, indent=2))]
 
             else:
                 return [TextContent(type="text", text=f"Unknown tool: {name}")]

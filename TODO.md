@@ -38,11 +38,12 @@ Expose an MCP resource that provides curated project context:
 
 Store conversation summaries, not just atomic facts:
 
-- [ ] Add `conversation_id` field to link related memories
-- [ ] Add `session` memory type for session summaries
-- [ ] Implement end-of-session summarization hook
-- [ ] Store: what was discussed, decisions made, open questions
-- [ ] Track "work in progress" state
+- [x] Add `session_id` field to link related memories
+- [x] Add `session` memory type for session summaries
+- [x] Add sessions table with summary, topics, decisions, open_questions
+- [x] Store: what was discussed, decisions made, open questions
+- [x] CLI: `claude-memory session start/end/list/show`
+- [ ] Implement end-of-session summarization hook (auto-summarize)
 
 ### 0.3 "Continue Where We Left Off"
 
@@ -412,7 +413,7 @@ Memories accumulate. Eventually you need synthesis, not just storage.
 | Semantic Search (basic) | High | Medium | P0 | DONE |
 | Project Scoping | High | Low | P1 | DONE |
 | Docker Compose Support | Medium | Low | P1 | DONE |
-| Conversation Summaries | High | Medium | P1 | |
+| Conversation Summaries | High | Medium | P1 | DONE |
 | WAL/Event Sourcing | High | High | P2 | |
 | Knowledge Graph (basic) | Medium | Medium | P2 | |
 | Auto-Summarization | Medium | High | P2 | |

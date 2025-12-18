@@ -342,3 +342,78 @@ class TestMemoryStorage:
         # Should not have duplicate warning
         assert "similar_memories" not in result
         assert "duplicate_warning" not in result
+
+    def test_session_lifecycle(self, storage):
+        """Test starting, ending, and retrieving sessions."""
+        # Start a session
+        session = storage.start_session(project_id="test-project", client_id="test-client")
+        assert session["id"] is not None
+        assert session["status"] == "active"
+        assert session["project_id"] == "test-project"
+
+        # Get active session
+        active = storage.get_active_session(project_id="test-project")
+        assert active is not None
+        assert active["id"] == session["id"]
+
+        # End the session with summary
+        ended = storage.end_session(
+            session_id=session["id"],
+            summary="Worked on test feature",
+            topics=["testing", "sessions"],
+            decisions=["Use pytest for testing"],
+            open_questions=["How to test async?"],
+        )
+        assert ended is not None
+        assert ended["status"] == "completed"
+        assert ended["summary"] == "Worked on test feature"
+        assert "testing" in ended["topics"]
+        assert "Use pytest for testing" in ended["decisions"]
+
+        # Get last session
+        last = storage.get_last_session(project_id="test-project")
+        assert last is not None
+        assert last["id"] == session["id"]
+
+        # No more active session
+        active = storage.get_active_session(project_id="test-project")
+        assert active is None
+
+    def test_list_sessions(self, storage):
+        """Test listing sessions."""
+        # Create some sessions
+        s1 = storage.start_session(project_id="project-a")
+        storage.end_session(s1["id"], summary="Session 1")
+
+        s2 = storage.start_session(project_id="project-a")
+        storage.end_session(s2["id"], summary="Session 2")
+
+        s3 = storage.start_session(project_id="project-b")
+        # Leave s3 active
+
+        # List all sessions
+        all_sessions = storage.list_sessions()
+        assert len(all_sessions) == 3
+
+        # List by project
+        project_a_sessions = storage.list_sessions(project_id="project-a")
+        assert len(project_a_sessions) == 2
+
+        # List by status
+        active_sessions = storage.list_sessions(status="active")
+        assert len(active_sessions) == 1
+        assert active_sessions[0]["id"] == s3["id"]
+
+    def test_session_creates_memory(self, storage):
+        """Test that ending a session creates a session-type memory."""
+        session = storage.start_session(project_id="test")
+        storage.end_session(
+            session["id"],
+            summary="Implemented new feature",
+            topics=["feature"],
+        )
+
+        # Search for session memories
+        results = storage.search(memory_type="session", project_id="test", search_mode="keyword")
+        assert len(results) >= 1
+        assert "Implemented new feature" in results[0]["content"]

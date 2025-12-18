@@ -226,6 +226,154 @@ def find_similar(ctx: click.Context, content: str, threshold: float, limit: int,
         click.echo()
 
 
+@main.group("session")
+@click.pass_context
+def session_group(ctx: click.Context) -> None:
+    """Manage conversation sessions."""
+    pass
+
+
+@session_group.command("start")
+@click.pass_context
+def session_start(ctx: click.Context) -> None:
+    """Start a new conversation session."""
+    storage: MemoryStorage = ctx.obj["storage"]
+    project_id = ctx.obj.get("project")
+
+    # Check for existing active session
+    active = storage.get_active_session(project_id)
+    if active:
+        click.echo(f"Active session already exists: {active['id']}")
+        click.echo(f"Started: {active['started_at']}")
+        click.echo("Use 'session end' to close it first, or continue using it.")
+        return
+
+    session = storage.start_session(project_id=project_id)
+    click.echo(f"Started session: {session['id']}")
+    if project_id:
+        click.echo(f"Project: {project_id}")
+
+
+@session_group.command("end")
+@click.option("--summary", "-s", help="Summary of what was accomplished")
+@click.option("--topic", "-t", "topics", multiple=True, help="Topics discussed")
+@click.option("--decision", "-d", "decisions", multiple=True, help="Decisions made")
+@click.option("--question", "-q", "questions", multiple=True, help="Open questions/TODOs")
+@click.option("--id", "session_id", help="Session ID (uses active session if not specified)")
+@click.pass_context
+def session_end(ctx: click.Context, summary: str | None, topics: tuple, decisions: tuple, questions: tuple, session_id: str | None) -> None:
+    """End a session with summary."""
+    storage: MemoryStorage = ctx.obj["storage"]
+    project_id = ctx.obj.get("project")
+
+    # Find session to end
+    if not session_id:
+        active = storage.get_active_session(project_id)
+        if not active:
+            click.echo("No active session found. Use --id to specify a session.")
+            return
+        session_id = active["id"]
+
+    result = storage.end_session(
+        session_id=session_id,
+        summary=summary,
+        topics=list(topics) if topics else None,
+        decisions=list(decisions) if decisions else None,
+        open_questions=list(questions) if questions else None,
+    )
+
+    if result:
+        click.echo(f"Ended session: {session_id}")
+        if summary:
+            click.echo(f"Summary: {summary}")
+        if topics:
+            click.echo(f"Topics: {', '.join(topics)}")
+        if decisions:
+            click.echo(f"Decisions: {', '.join(decisions)}")
+        if questions:
+            click.echo(f"Open questions: {', '.join(questions)}")
+    else:
+        click.echo(f"Session not found: {session_id}")
+
+
+@session_group.command("list")
+@click.option("--status", type=click.Choice(["active", "completed"]), help="Filter by status")
+@click.option("--limit", "-n", default=10, help="Max sessions to show")
+@click.option("--global", "-g", "global_list", is_flag=True, help="List across all projects")
+@click.pass_context
+def session_list(ctx: click.Context, status: str | None, limit: int, global_list: bool) -> None:
+    """List sessions."""
+    storage: MemoryStorage = ctx.obj["storage"]
+    project_id = None if global_list else ctx.obj.get("project")
+
+    sessions = storage.list_sessions(project_id=project_id, status=status, limit=limit)
+
+    if not sessions:
+        click.echo("No sessions found.")
+        return
+
+    click.echo(f"Found {len(sessions)} sessions:\n")
+    for s in sessions:
+        status_icon = "🟢" if s["status"] == "active" else "✅"
+        click.echo(f"{status_icon} [{s['id']}] {s['status']} - {s.get('project_id', 'no project')}")
+        click.echo(f"   Started: {s['started_at']}")
+        if s.get("ended_at"):
+            click.echo(f"   Ended: {s['ended_at']}")
+        if s.get("summary"):
+            click.echo(f"   Summary: {s['summary'][:60]}...")
+        if s.get("decisions"):
+            click.echo(f"   Decisions: {len(s['decisions'])}")
+        if s.get("open_questions"):
+            click.echo(f"   Open questions: {len(s['open_questions'])}")
+        click.echo()
+
+
+@session_group.command("show")
+@click.argument("session_id", required=False)
+@click.pass_context
+def session_show(ctx: click.Context, session_id: str | None) -> None:
+    """Show details of a session."""
+    storage: MemoryStorage = ctx.obj["storage"]
+    project_id = ctx.obj.get("project")
+
+    if not session_id:
+        # Show active or last session
+        session = storage.get_active_session(project_id) or storage.get_last_session(project_id)
+        if not session:
+            click.echo("No sessions found.")
+            return
+    else:
+        session = storage.get_session(session_id)
+        if not session:
+            click.echo(f"Session not found: {session_id}")
+            return
+
+    click.echo(f"Session: {session['id']}")
+    click.echo(f"Status: {session['status']}")
+    click.echo(f"Project: {session.get('project_id', 'none')}")
+    click.echo(f"Started: {session['started_at']}")
+    if session.get("ended_at"):
+        click.echo(f"Ended: {session['ended_at']}")
+
+    if session.get("summary"):
+        click.echo(f"\nSummary:\n  {session['summary']}")
+
+    if session.get("topics"):
+        click.echo(f"\nTopics:")
+        for t in session["topics"]:
+            click.echo(f"  - {t}")
+
+    if session.get("decisions"):
+        click.echo(f"\nDecisions:")
+        for d in session["decisions"]:
+            click.echo(f"  - {d}")
+
+    if session.get("open_questions"):
+        click.echo(f"\nOpen Questions:")
+        for q in session["open_questions"]:
+            click.echo(f"  - {q}")
+
+
 @main.command("backfill-embeddings")
 @click.option("--batch-size", "-b", default=100, help="Batch size for processing")
 @click.pass_context

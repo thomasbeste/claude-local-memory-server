@@ -180,6 +180,32 @@ class MemoryStorage:
             logger.info("Adding project_id column to existing database")
             self.db.execute("ALTER TABLE memories ADD COLUMN project_id VARCHAR")
 
+        if "session_id" not in column_names:
+            logger.info("Adding session_id column to existing database")
+            self.db.execute("ALTER TABLE memories ADD COLUMN session_id VARCHAR")
+
+        # Create sessions table for conversation tracking
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id VARCHAR PRIMARY KEY,
+                project_id VARCHAR,
+                client_id VARCHAR,
+                started_at TIMESTAMP WITH TIME ZONE,
+                ended_at TIMESTAMP WITH TIME ZONE,
+                summary VARCHAR,
+                topics VARCHAR[],
+                decisions VARCHAR[],
+                open_questions VARCHAR[],
+                status VARCHAR DEFAULT 'active'
+            )
+        """)
+        self.db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id)
+        """)
+        self.db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)
+        """)
+
     def _migrate_from_parquet(self) -> None:
         """Migrate data from legacy parquet file if it exists."""
         if not self.legacy_parquet_path.exists():
@@ -822,13 +848,25 @@ class MemoryStorage:
             [project_id] if project_id else [],
         ).fetchone()
 
-        last_session_info = None
+        last_activity_info = None
         if last_activity:
-            last_session_info = {
+            last_activity_info = {
                 "timestamp": last_activity[0],
                 "last_memory": last_activity[1],
                 "type": last_activity[2],
             }
+
+        # Get last completed session for "continue where we left off"
+        last_session = self.get_last_session(project_id)
+        if last_session and last_session.get("summary"):
+            lines.append("### Last Session")
+            lines.append(f"_{last_session['ended_at']}_")
+            lines.append(f"{last_session['summary']}")
+            if last_session.get("open_questions"):
+                lines.append("\n**Open questions:**")
+                for q in last_session["open_questions"][:3]:
+                    lines.append(f"- {q}")
+            lines.append("")
 
         return {
             "project_id": project_id,
@@ -836,8 +874,216 @@ class MemoryStorage:
             "memory_count": len(result),
             "summary": "\n".join(lines),
             "memories_by_type": memories_by_type,
-            "last_activity": last_session_info,
+            "last_activity": last_activity_info,
+            "last_session": last_session,
         }
+
+    # --- Session Management ---
+
+    def start_session(
+        self,
+        project_id: str | None = None,
+        client_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Start a new conversation session.
+
+        Args:
+            project_id: Project this session belongs to
+            client_id: Client starting the session
+
+        Returns:
+            Session info dict
+        """
+        session_id = str(uuid.uuid4())[:8]
+        now = datetime.now(timezone.utc)
+
+        self.db.execute(
+            """
+            INSERT INTO sessions (id, project_id, client_id, started_at, status)
+            VALUES (?, ?, ?, ?, 'active')
+            """,
+            [session_id, project_id, client_id, now],
+        )
+
+        return {
+            "id": session_id,
+            "project_id": project_id,
+            "client_id": client_id,
+            "started_at": now.isoformat(),
+            "status": "active",
+        }
+
+    def end_session(
+        self,
+        session_id: str,
+        summary: str | None = None,
+        topics: list[str] | None = None,
+        decisions: list[str] | None = None,
+        open_questions: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """
+        End a session with optional summary.
+
+        Args:
+            session_id: ID of the session to end
+            summary: Free-form summary of the session
+            topics: List of topics discussed
+            decisions: List of decisions made
+            open_questions: List of unresolved questions/TODOs
+
+        Returns:
+            Updated session info or None if not found
+        """
+        session = self.get_session(session_id)
+        if not session:
+            return None
+
+        now = datetime.now(timezone.utc)
+
+        self.db.execute(
+            """
+            UPDATE sessions
+            SET ended_at = ?, summary = ?, topics = ?, decisions = ?,
+                open_questions = ?, status = 'completed'
+            WHERE id = ?
+            """,
+            [now, summary, topics or [], decisions or [], open_questions or [], session_id],
+        )
+
+        # Also create a session-type memory for easy searching
+        if summary:
+            self.add(
+                content=summary,
+                memory_type="session",
+                tags=["session:" + session_id] + (topics or []),
+                project_id=session.get("project_id"),
+                client_id=session.get("client_id"),
+                check_duplicates=False,
+            )
+
+        return self.get_session(session_id)
+
+    def get_session(self, session_id: str) -> dict[str, Any] | None:
+        """Get a specific session by ID."""
+        result = self.db.execute(
+            """
+            SELECT id, project_id, client_id, started_at, ended_at,
+                   summary, topics, decisions, open_questions, status
+            FROM sessions WHERE id = ?
+            """,
+            [session_id],
+        ).fetchone()
+
+        if not result:
+            return None
+
+        columns = ["id", "project_id", "client_id", "started_at", "ended_at",
+                   "summary", "topics", "decisions", "open_questions", "status"]
+        return dict(zip(columns, result))
+
+    def get_active_session(self, project_id: str | None = None) -> dict[str, Any] | None:
+        """Get the current active session for a project."""
+        if project_id:
+            result = self.db.execute(
+                """
+                SELECT id, project_id, client_id, started_at, ended_at,
+                       summary, topics, decisions, open_questions, status
+                FROM sessions
+                WHERE project_id = ? AND status = 'active'
+                ORDER BY started_at DESC
+                LIMIT 1
+                """,
+                [project_id],
+            ).fetchone()
+        else:
+            result = self.db.execute(
+                """
+                SELECT id, project_id, client_id, started_at, ended_at,
+                       summary, topics, decisions, open_questions, status
+                FROM sessions
+                WHERE status = 'active'
+                ORDER BY started_at DESC
+                LIMIT 1
+                """,
+            ).fetchone()
+
+        if not result:
+            return None
+
+        columns = ["id", "project_id", "client_id", "started_at", "ended_at",
+                   "summary", "topics", "decisions", "open_questions", "status"]
+        return dict(zip(columns, result))
+
+    def get_last_session(self, project_id: str | None = None) -> dict[str, Any] | None:
+        """Get the most recent completed session for a project."""
+        if project_id:
+            result = self.db.execute(
+                """
+                SELECT id, project_id, client_id, started_at, ended_at,
+                       summary, topics, decisions, open_questions, status
+                FROM sessions
+                WHERE project_id = ? AND status = 'completed'
+                ORDER BY ended_at DESC
+                LIMIT 1
+                """,
+                [project_id],
+            ).fetchone()
+        else:
+            result = self.db.execute(
+                """
+                SELECT id, project_id, client_id, started_at, ended_at,
+                       summary, topics, decisions, open_questions, status
+                FROM sessions
+                WHERE status = 'completed'
+                ORDER BY ended_at DESC
+                LIMIT 1
+                """,
+            ).fetchone()
+
+        if not result:
+            return None
+
+        columns = ["id", "project_id", "client_id", "started_at", "ended_at",
+                   "summary", "topics", "decisions", "open_questions", "status"]
+        return dict(zip(columns, result))
+
+    def list_sessions(
+        self,
+        project_id: str | None = None,
+        status: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """List sessions with optional filters."""
+        conditions = []
+        params: list = []
+
+        if project_id:
+            conditions.append("project_id = ?")
+            params.append(project_id)
+
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        params.append(limit)
+
+        result = self.db.execute(
+            f"""
+            SELECT id, project_id, client_id, started_at, ended_at,
+                   summary, topics, decisions, open_questions, status
+            FROM sessions
+            WHERE {where_clause}
+            ORDER BY started_at DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+
+        columns = ["id", "project_id", "client_id", "started_at", "ended_at",
+                   "summary", "topics", "decisions", "open_questions", "status"]
+        return [dict(zip(columns, row)) for row in result]
 
     def close(self) -> None:
         """Close the database connection."""

@@ -1,7 +1,7 @@
-# Claude Memory Server - Docker Image
+# Claude Local Memory Server - Docker Image
 #
-# Build: docker build -t claude-memory .
-# Run:   docker run -d -p 8420:8420 -v claude-memory-data:/data claude-memory
+# Build: docker build -t claude-local-memory-server .
+# Run:   docker run -d -p 8420:8420 -v claude-local-memory-server-data:/data claude-local-memory-server
 
 FROM python:3.12-slim
 

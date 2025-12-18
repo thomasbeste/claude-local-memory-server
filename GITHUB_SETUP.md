@@ -1,7 +1,7 @@
 # GitHub Repository Setup
 
 ## Repository Name
-claude-memory
+claude-local-memory-server
 
 ## Description (About)
 Persistent, shared memory for Claude Code via MCP. DuckDB/Parquet storage with multi-machine support.

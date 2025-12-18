@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# Claude Memory Server - Uninstall Script
+# Claude Local Memory Server - Uninstall Script
 #
 
 set -e
 
-INSTALL_DIR="/opt/claude-memory"
-DATA_DIR="/var/lib/claude-memory"
+INSTALL_DIR="/opt/claude-local-memory-server"
+DATA_DIR="/var/lib/claude-local-memory-server"
 SERVICE_USER="claude-memory"
 
 RED='\033[0;31m'
@@ -22,7 +22,7 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-echo "This will remove Claude Memory Server."
+echo "This will remove Claude Local Memory Server."
 echo "Data in $DATA_DIR will be preserved unless you use --purge"
 echo ""
 read -p "Continue? [y/N] " -n 1 -r
@@ -32,20 +32,20 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 # Stop and disable service
-if systemctl is-active --quiet claude-memory 2>/dev/null; then
+if systemctl is-active --quiet claude-local-memory-server 2>/dev/null; then
     log_info "Stopping service..."
-    systemctl stop claude-memory
+    systemctl stop claude-local-memory-server
 fi
 
-if systemctl is-enabled --quiet claude-memory 2>/dev/null; then
+if systemctl is-enabled --quiet claude-local-memory-server 2>/dev/null; then
     log_info "Disabling service..."
-    systemctl disable claude-memory
+    systemctl disable claude-local-memory-server
 fi
 
 # Remove service file
-if [[ -f /etc/systemd/system/claude-memory.service ]]; then
+if [[ -f /etc/systemd/system/claude-local-memory-server.service ]]; then
     log_info "Removing systemd service..."
-    rm /etc/systemd/system/claude-memory.service
+    rm /etc/systemd/system/claude-local-memory-server.service
     systemctl daemon-reload
 fi
 

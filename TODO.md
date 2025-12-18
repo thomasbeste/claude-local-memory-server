@@ -1,4 +1,4 @@
-# Claude Memory Server - Development Roadmap
+# Claude Local Memory Server - Development Roadmap
 
 > A comprehensive list of improvements to transform this from "it works on my machine" to "enterprise-grade memory persistence."
 

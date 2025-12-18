@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Claude Memory Server - Systemd Installation Script (LXC/VM/Bare Metal)
+# Claude Local Memory Server - Systemd Installation Script (LXC/VM/Bare Metal)
 #
 # For Docker deployment, use install-docker.sh instead.
 #
@@ -10,15 +10,15 @@
 # Options:
 #   --port PORT         HTTP port (default: 8420)
 #   --api-key KEY       Set API key for authentication
-#   --data-dir DIR      Data directory (default: /var/lib/claude-memory)
+#   --data-dir DIR      Data directory (default: /var/lib/claude-local-memory-server)
 #   --no-service        Don't install systemd service
 #
 
 set -e
 
 # --- Configuration ---
-INSTALL_DIR="/opt/claude-memory"
-DATA_DIR="/var/lib/claude-memory"
+INSTALL_DIR="/opt/claude-local-memory-server"
+DATA_DIR="/var/lib/claude-local-memory-server"
 SERVICE_USER="claude-memory"
 PORT=8420
 API_KEY=""
@@ -59,7 +59,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --port PORT         HTTP port (default: 8420)"
             echo "  --api-key KEY       Set API key for authentication"
-            echo "  --data-dir DIR      Data directory (default: /var/lib/claude-memory)"
+            echo "  --data-dir DIR      Data directory (default: /var/lib/claude-local-memory-server)"
             echo "  --no-service        Don't install systemd service"
             exit 0
             ;;
@@ -160,7 +160,7 @@ if [[ -f "$SCRIPT_DIR/pyproject.toml" ]]; then
     pip install -e ".[server]"
 else
     log_info "Installing from PyPI..."
-    pip install "claude-memory[server]"
+    pip install "claude-local-memory-server[server]"
 fi
 
 # --- Set permissions ---
@@ -178,7 +178,7 @@ fi
 # --- Create environment file ---
 log_info "Creating environment file..."
 cat > "$INSTALL_DIR/.env" << EOF
-# Claude Memory Server Configuration
+# Claude Local Memory Server Configuration
 MEMORY_API_KEY=$API_KEY
 DATA_DIR=$DATA_DIR
 PORT=$PORT
@@ -190,11 +190,11 @@ chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/.env"
 # --- Install systemd service ---
 if [[ "$INSTALL_SERVICE" == true ]]; then
     log_info "Installing systemd service..."
-    
-    cat > /etc/systemd/system/claude-memory.service << EOF
+
+    cat > /etc/systemd/system/claude-local-memory-server.service << EOF
 [Unit]
-Description=Claude Memory Server
-Documentation=https://github.com/your-repo/claude-memory
+Description=Claude Local Memory Server
+Documentation=https://github.com/thomasbeste/claude-local-memory-server
 After=network.target
 
 [Service]
@@ -225,24 +225,24 @@ EOF
 
     # Reload and enable service
     systemctl daemon-reload
-    systemctl enable claude-memory
-    systemctl start claude-memory
-    
+    systemctl enable claude-local-memory-server
+    systemctl start claude-local-memory-server
+
     log_info "Service installed and started"
-    
+
     # Wait a moment and check status
     sleep 2
-    if systemctl is-active --quiet claude-memory; then
+    if systemctl is-active --quiet claude-local-memory-server; then
         log_info "Service is running"
     else
-        log_error "Service failed to start. Check: journalctl -u claude-memory"
+        log_error "Service failed to start. Check: journalctl -u claude-local-memory-server"
     fi
 fi
 
 # --- Print summary ---
 echo ""
 echo "========================================"
-echo "  Claude Memory Server Installed!"
+echo "  Claude Local Memory Server Installed!"
 echo "========================================"
 echo ""
 echo "  Install directory: $INSTALL_DIR"
@@ -251,9 +251,9 @@ echo "  Port:              $PORT"
 echo "  API Key:           $API_KEY"
 echo ""
 echo "  Service commands:"
-echo "    systemctl status claude-memory"
-echo "    systemctl restart claude-memory"
-echo "    journalctl -u claude-memory -f"
+echo "    systemctl status claude-local-memory-server"
+echo "    systemctl restart claude-local-memory-server"
+echo "    journalctl -u claude-local-memory-server -f"
 echo ""
 echo "  Test the server:"
 echo "    curl http://localhost:$PORT/health"
@@ -267,7 +267,7 @@ echo "========================================"
 
 # --- Save config for easy reference ---
 cat > "$INSTALL_DIR/client-config.txt" << EOF
-# Claude Memory Client Configuration
+# Claude Local Memory Server - Client Configuration
 # Copy this to your development machines
 
 MEMORY_SERVER=http://$(hostname -I | awk '{print $1}'):$PORT

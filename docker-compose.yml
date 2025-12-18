@@ -1,4 +1,4 @@
-# Claude Memory Server - Docker Compose Configuration
+# Claude Local Memory Server - Docker Compose Configuration
 #
 # Quick start:
 #   docker compose up -d
@@ -12,8 +12,8 @@
 services:
   memory-server:
     build: .
-    image: claude-memory:latest
-    container_name: claude-memory
+    image: claude-local-memory-server:latest
+    container_name: claude-local-memory-server
     restart: unless-stopped
     ports:
       - "${PORT:-8420}:8420"
@@ -33,4 +33,4 @@ services:
 
 volumes:
   memory-data:
-    name: claude-memory-data
+    name: claude-local-memory-server-data

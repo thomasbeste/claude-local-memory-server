@@ -1,5 +1,5 @@
 [project]
-name = "claude-memory"
+name = "claude-local-memory-server"
 version = "0.1.0"
 description = "Persistent, shared memory for Claude Code via MCP"
 readme = "README.md"
@@ -38,9 +38,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USERNAME/claude-memory"
-Repository = "https://github.com/YOUR_USERNAME/claude-memory"
-Issues = "https://github.com/YOUR_USERNAME/claude-memory/issues"
+Homepage = "https://github.com/thomasbeste/claude-local-memory-server"
+Repository = "https://github.com/thomasbeste/claude-local-memory-server"
+Issues = "https://github.com/thomasbeste/claude-local-memory-server/issues"
 
 [project.optional-dependencies]
 server = [
@@ -55,7 +55,7 @@ dev = [
     "ruff>=0.5.0",
 ]
 all = [
-    "claude-memory[server,embeddings]",
+    "claude-local-memory-server[server,embeddings]",
 ]
 
 [project.scripts]

@@ -1,4 +1,4 @@
-# Contributing to Claude Memory
+# Contributing to Claude Local Memory Server
 
 Thanks for your interest in contributing! This project is open to contributions of all kinds.
 
@@ -7,8 +7,8 @@ Thanks for your interest in contributing! This project is open to contributions 
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/claude-memory.git
-   cd claude-memory
+   git clone https://github.com/thomasbeste/claude-local-memory-server.git
+   cd claude-local-memory-server
    ```
 
 3. Set up development environment:
@@ -101,7 +101,7 @@ When reporting bugs, please include:
 ## Project Structure
 
 ```
-claude-memory/
+claude-local-memory-server/
 ├── src/claude_memory/
 │   ├── __init__.py     # Package exports
 │   ├── storage.py      # DuckDB/Parquet storage

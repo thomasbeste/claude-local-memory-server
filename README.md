@@ -1,4 +1,4 @@
-# Claude Memory
+# Claude Local Memory Server
 
 **Persistent, shared memory for Claude Code via MCP**
 
@@ -13,8 +13,8 @@ A lightweight memory server that gives Claude Code durable, searchable memory ac
          └───────────┬───────────┘
                      ▼
           ┌─────────────────────┐
-          │  claude-memory      │
-          │  server             │
+          │  claude-local-      │
+          │  memory-server      │
           │  (your LXC/server)  │
           └─────────────────────┘
 ```
@@ -37,7 +37,7 @@ A lightweight memory server that gives Claude Code durable, searchable memory ac
 
 ```bash
 # Install
-pip install claude-memory
+pip install claude-local-memory-server
 
 # Configure Claude Code
 claude mcp add-json "memory" '{
@@ -50,8 +50,8 @@ claude mcp add-json "memory" '{
 ### Option 2: Server Mode with Docker (recommended)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-memory.git
-cd claude-memory
+git clone https://github.com/thomasbeste/claude-local-memory-server.git
+cd claude-local-memory-server
 ./scripts/install-docker.sh
 ```
 
@@ -75,8 +75,8 @@ docker compose logs -f
 **On your server (Debian/Ubuntu LXC, VM, etc.):**
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-memory.git
-cd claude-memory
+git clone https://github.com/thomasbeste/claude-local-memory-server.git
+cd claude-local-memory-server
 sudo ./scripts/install-systemd.sh
 ```
 
@@ -85,7 +85,7 @@ The script installs Python, creates a systemd service, and prints your API key.
 **On each client machine:**
 
 ```bash
-pip install claude-memory
+pip install claude-local-memory-server
 
 claude mcp add-json "memory" '{
   "command": "python",
@@ -197,7 +197,7 @@ claude-memory server --help
 Options:
   --host TEXT      Host to bind to [default: 0.0.0.0]
   --port INTEGER   Port to bind to [default: 8420]
-  --data-dir TEXT  Data directory [default: /var/lib/claude-memory]
+  --data-dir TEXT  Data directory [default: /var/lib/claude-local-memory-server]
 ```
 
 ### Install Script Options
@@ -219,7 +219,7 @@ Options:
 Options:
   --port PORT         HTTP port [default: 8420]
   --api-key KEY       Set API key (generated if omitted)
-  --data-dir DIR      Data directory [default: /var/lib/claude-memory]
+  --data-dir DIR      Data directory [default: /var/lib/claude-local-memory-server]
   --no-service        Don't install systemd service
 ```
 
@@ -241,7 +241,7 @@ src/claude_memory/
 ## Data Storage
 
 Memories are stored in a persistent DuckDB database:
-- **Server:** `/var/lib/claude-memory/memories.duckdb`
+- **Server:** `/var/lib/claude-local-memory-server/memories.duckdb`
 - **Local:** `~/.claude-memory/memories.duckdb`
 
 The database includes embeddings for semantic search (384-dimensional vectors from `all-MiniLM-L6-v2`).
@@ -261,15 +261,15 @@ storage.export_parquet("/path/to/backup.parquet")
 
 Backup script:
 ```bash
-./scripts/backup.sh  # Creates timestamped backup in /var/backups/claude-memory/
+./scripts/backup.sh  # Creates timestamped backup in /var/backups/claude-local-memory-server/
 ```
 
 ## Development
 
 ```bash
 # Clone and install in development mode
-git clone https://github.com/YOUR_USERNAME/claude-memory.git
-cd claude-memory
+git clone https://github.com/thomasbeste/claude-local-memory-server.git
+cd claude-local-memory-server
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev,server,embeddings]"

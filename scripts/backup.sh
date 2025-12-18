@@ -1,16 +1,16 @@
 #!/bin/bash
 #
-# Claude Memory Server - Backup Script
+# Claude Local Memory Server - Backup Script
 #
 # Usage:
-#   ./backup.sh                     # Backup to /var/backups/claude-memory/
+#   ./backup.sh                     # Backup to /var/backups/claude-local-memory-server/
 #   ./backup.sh /path/to/backup     # Backup to custom location
 #
 
 set -e
 
-DATA_DIR="/var/lib/claude-memory"
-BACKUP_DIR="${1:-/var/backups/claude-memory}"
+DATA_DIR="/var/lib/claude-local-memory-server"
+BACKUP_DIR="${1:-/var/backups/claude-local-memory-server}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILE="$BACKUP_DIR/memories_$TIMESTAMP.parquet"
 

@@ -110,6 +110,21 @@ class Embedder:
             return False
 
 
+# Default scores by memory type - decisions are high value, observations are lower
+DEFAULT_SCORES_BY_TYPE: dict[str, tuple[float, float]] = {
+    # (certainty, quality)
+    "decision": (0.9, 0.9),      # Decisions are explicit and high-value
+    "preference": (0.85, 0.8),   # Preferences are fairly certain and useful
+    "fact": (0.8, 0.75),         # Facts are usually reliable
+    "entity": (0.8, 0.7),        # Entities are concrete but context-dependent
+    "relation": (0.75, 0.7),     # Relations can be more speculative
+    "observation": (0.6, 0.5),   # Observations are low-certainty, may or may not be useful
+    "session": (0.9, 0.6),       # Sessions are certain but not always high-value
+}
+DEFAULT_CERTAINTY = 0.7
+DEFAULT_QUALITY = 0.7
+
+
 class MemoryStorage:
     """Persistent memory storage using DuckDB with semantic search support."""
 
@@ -150,7 +165,9 @@ class MemoryStorage:
                 project_id VARCHAR,
                 created_at TIMESTAMP WITH TIME ZONE,
                 updated_at TIMESTAMP WITH TIME ZONE,
-                embedding FLOAT[]
+                embedding FLOAT[],
+                certainty_score FLOAT DEFAULT 0.7,
+                quality_score FLOAT DEFAULT 0.7
             )
         """)
 
@@ -183,6 +200,14 @@ class MemoryStorage:
         if "session_id" not in column_names:
             logger.info("Adding session_id column to existing database")
             self.db.execute("ALTER TABLE memories ADD COLUMN session_id VARCHAR")
+
+        if "certainty_score" not in column_names:
+            logger.info("Adding certainty_score column to existing database")
+            self.db.execute("ALTER TABLE memories ADD COLUMN certainty_score FLOAT DEFAULT 0.7")
+
+        if "quality_score" not in column_names:
+            logger.info("Adding quality_score column to existing database")
+            self.db.execute("ALTER TABLE memories ADD COLUMN quality_score FLOAT DEFAULT 0.7")
 
         # Create sessions table for conversation tracking
         self.db.execute("""
@@ -312,6 +337,8 @@ class MemoryStorage:
         project_id: str | None = None,
         check_duplicates: bool = True,
         duplicate_threshold: float = 0.85,
+        certainty_score: float | None = None,
+        quality_score: float | None = None,
     ) -> dict[str, Any]:
         """
         Add a new memory with optional embedding and duplicate detection.
@@ -325,6 +352,8 @@ class MemoryStorage:
             project_id: Project identifier
             check_duplicates: Whether to check for similar existing memories
             duplicate_threshold: Similarity threshold for duplicate detection (0-1)
+            certainty_score: How certain this memory is (0-1). Defaults based on memory_type.
+            quality_score: How valuable this memory is (0-1). Defaults based on memory_type.
 
         Returns:
             Dict with memory info and any duplicate warnings
@@ -332,6 +361,15 @@ class MemoryStorage:
         memory_id = str(uuid.uuid4())[:8]
         now = datetime.now(timezone.utc)
         tags = tags or []
+
+        # Get default scores based on memory type if not provided
+        type_defaults = DEFAULT_SCORES_BY_TYPE.get(memory_type, (DEFAULT_CERTAINTY, DEFAULT_QUALITY))
+        certainty = certainty_score if certainty_score is not None else type_defaults[0]
+        quality = quality_score if quality_score is not None else type_defaults[1]
+
+        # Clamp to valid range
+        certainty = max(0.0, min(1.0, certainty))
+        quality = max(0.0, min(1.0, quality))
 
         # Check for duplicates before adding
         duplicates = []
@@ -343,10 +381,10 @@ class MemoryStorage:
 
         self.db.execute(
             """
-            INSERT INTO memories (id, content, memory_type, tags, source, client_id, project_id, created_at, updated_at, embedding)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO memories (id, content, memory_type, tags, source, client_id, project_id, created_at, updated_at, embedding, certainty_score, quality_score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [memory_id, content, memory_type, tags, source, client_id, project_id, now, now, embedding],
+            [memory_id, content, memory_type, tags, source, client_id, project_id, now, now, embedding, certainty, quality],
         )
 
         result = {
@@ -359,6 +397,8 @@ class MemoryStorage:
             "project_id": project_id,
             "created_at": now.isoformat(),
             "has_embedding": embedding is not None,
+            "certainty_score": certainty,
+            "quality_score": quality,
         }
 
         if duplicates:
@@ -377,6 +417,8 @@ class MemoryStorage:
         global_search: bool = False,
         limit: int = 20,
         search_mode: str = "hybrid",  # "keyword", "semantic", "hybrid"
+        min_certainty: float = 0.0,
+        min_quality: float = 0.0,
     ) -> list[dict[str, Any]]:
         """
         Search memories with optional filters.
@@ -394,6 +436,8 @@ class MemoryStorage:
                 - "keyword": Traditional ILIKE substring matching
                 - "semantic": Vector similarity search using embeddings
                 - "hybrid": Combines keyword and semantic (default)
+            min_certainty: Minimum certainty score to include (0-1)
+            min_quality: Minimum quality score to include (0-1)
         """
         # If no query provided, fall back to keyword mode (just filters)
         if not query:
@@ -409,11 +453,11 @@ class MemoryStorage:
         effective_project = None if global_search else project_id
 
         if search_mode == "keyword":
-            return self._keyword_search(query, memory_type, tags, client_id, effective_project, limit)
+            return self._keyword_search(query, memory_type, tags, client_id, effective_project, limit, min_certainty, min_quality)
         elif search_mode == "semantic":
-            return self._semantic_search(query, memory_type, tags, client_id, effective_project, limit)
+            return self._semantic_search(query, memory_type, tags, client_id, effective_project, limit, 0.0, min_certainty, min_quality)
         else:  # hybrid
-            return self._hybrid_search(query, memory_type, tags, client_id, effective_project, limit)
+            return self._hybrid_search(query, memory_type, tags, client_id, effective_project, limit, 0.5, min_certainty, min_quality)
 
     def _keyword_search(
         self,
@@ -423,6 +467,8 @@ class MemoryStorage:
         client_id: str | None,
         project_id: str | None,
         limit: int,
+        min_certainty: float = 0.0,
+        min_quality: float = 0.0,
     ) -> list[dict[str, Any]]:
         """Traditional keyword-based search."""
         conditions = []
@@ -448,21 +494,31 @@ class MemoryStorage:
             conditions.append("project_id = ?")
             params.append(project_id)
 
+        if min_certainty > 0:
+            conditions.append("COALESCE(certainty_score, 0.7) >= ?")
+            params.append(min_certainty)
+
+        if min_quality > 0:
+            conditions.append("COALESCE(quality_score, 0.7) >= ?")
+            params.append(min_quality)
+
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         params.append(limit)
 
         result = self.db.execute(
             f"""
-            SELECT id, content, memory_type, tags, source, client_id, project_id, created_at, updated_at
+            SELECT id, content, memory_type, tags, source, client_id, project_id, created_at, updated_at,
+                   COALESCE(certainty_score, 0.7) as certainty_score,
+                   COALESCE(quality_score, 0.7) as quality_score
             FROM memories
             WHERE {where_clause}
-            ORDER BY created_at DESC
+            ORDER BY quality_score DESC, certainty_score DESC, created_at DESC
             LIMIT ?
             """,
             params,
         ).fetchall()
 
-        columns = ["id", "content", "memory_type", "tags", "source", "client_id", "project_id", "created_at", "updated_at"]
+        columns = ["id", "content", "memory_type", "tags", "source", "client_id", "project_id", "created_at", "updated_at", "certainty_score", "quality_score"]
         return [dict(zip(columns, row)) for row in result]
 
     def _semantic_search(
@@ -474,11 +530,13 @@ class MemoryStorage:
         project_id: str | None,
         limit: int,
         min_score: float = 0.0,
+        min_certainty: float = 0.0,
+        min_quality: float = 0.0,
     ) -> list[dict[str, Any]]:
-        """Vector similarity search using embeddings."""
+        """Vector similarity search using embeddings, weighted by quality scores."""
         query_embedding = self.embedder.embed(query)
         if query_embedding is None:
-            return self._keyword_search(query, memory_type, tags, client_id, project_id, limit)
+            return self._keyword_search(query, memory_type, tags, client_id, project_id, limit, min_certainty, min_quality)
 
         conditions = ["embedding IS NOT NULL"]
         params = []
@@ -499,26 +557,37 @@ class MemoryStorage:
             conditions.append("project_id = ?")
             params.append(project_id)
 
+        if min_certainty > 0:
+            conditions.append("COALESCE(certainty_score, 0.7) >= ?")
+            params.append(min_certainty)
+
+        if min_quality > 0:
+            conditions.append("COALESCE(quality_score, 0.7) >= ?")
+            params.append(min_quality)
+
         where_clause = " AND ".join(conditions)
 
-        # Add query embedding and limit at the end
-        params.extend([query_embedding, min_score, limit])
-
+        # Weighted score: semantic similarity boosted by quality and certainty
+        # Formula: similarity * (0.5 + 0.3 * quality + 0.2 * certainty)
+        # Parameter order: [raw_score embed, score embed, condition params, where embed, min_score, limit]
         result = self.db.execute(
             f"""
             SELECT
                 id, content, memory_type, tags, source, client_id, project_id, created_at, updated_at,
-                list_cosine_similarity(embedding, ?::FLOAT[]) as score
+                COALESCE(certainty_score, 0.7) as certainty_score,
+                COALESCE(quality_score, 0.7) as quality_score,
+                list_cosine_similarity(embedding, ?::FLOAT[]) as raw_score,
+                list_cosine_similarity(embedding, ?::FLOAT[]) * (0.5 + 0.3 * COALESCE(quality_score, 0.7) + 0.2 * COALESCE(certainty_score, 0.7)) as score
             FROM memories
             WHERE {where_clause}
             AND list_cosine_similarity(embedding, ?::FLOAT[]) > ?
             ORDER BY score DESC
             LIMIT ?
             """,
-            [query_embedding] + params,
+            [query_embedding, query_embedding] + params + [query_embedding, min_score, limit],
         ).fetchall()
 
-        columns = ["id", "content", "memory_type", "tags", "source", "client_id", "project_id", "created_at", "updated_at", "score"]
+        columns = ["id", "content", "memory_type", "tags", "source", "client_id", "project_id", "created_at", "updated_at", "certainty_score", "quality_score", "raw_score", "score"]
         return [dict(zip(columns, row)) for row in result]
 
     def _hybrid_search(
@@ -530,20 +599,22 @@ class MemoryStorage:
         project_id: str | None,
         limit: int,
         alpha: float = 0.5,  # Weight for semantic vs keyword (0=keyword only, 1=semantic only)
+        min_certainty: float = 0.0,
+        min_quality: float = 0.0,
     ) -> list[dict[str, Any]]:
         """
         Hybrid search combining keyword and semantic results.
-        Uses Reciprocal Rank Fusion (RRF) to merge results.
+        Uses Reciprocal Rank Fusion (RRF) to merge results, boosted by quality scores.
         """
         # Get results from both methods
-        keyword_results = self._keyword_search(query, memory_type, tags, client_id, project_id, limit * 2)
-        semantic_results = self._semantic_search(query, memory_type, tags, client_id, project_id, limit * 2)
+        keyword_results = self._keyword_search(query, memory_type, tags, client_id, project_id, limit * 2, min_certainty, min_quality)
+        semantic_results = self._semantic_search(query, memory_type, tags, client_id, project_id, limit * 2, 0.0, min_certainty, min_quality)
 
         # If semantic failed, just return keyword
         if not semantic_results or not any(r.get("score") for r in semantic_results):
             return keyword_results[:limit]
 
-        # Reciprocal Rank Fusion
+        # Reciprocal Rank Fusion with quality boosting
         k = 60  # RRF constant
         scores: dict[str, float] = {}
         results_by_id: dict[str, dict] = {}
@@ -552,13 +623,20 @@ class MemoryStorage:
         for rank, result in enumerate(keyword_results):
             mem_id = result["id"]
             results_by_id[mem_id] = result
-            scores[mem_id] = scores.get(mem_id, 0) + (1 - alpha) * (1 / (k + rank + 1))
+            # Base RRF score boosted by quality/certainty
+            quality = result.get("quality_score", 0.7)
+            certainty = result.get("certainty_score", 0.7)
+            quality_boost = 0.5 + 0.3 * quality + 0.2 * certainty
+            scores[mem_id] = scores.get(mem_id, 0) + (1 - alpha) * (1 / (k + rank + 1)) * quality_boost
 
         # Score semantic results
         for rank, result in enumerate(semantic_results):
             mem_id = result["id"]
             results_by_id[mem_id] = result
-            scores[mem_id] = scores.get(mem_id, 0) + alpha * (1 / (k + rank + 1))
+            quality = result.get("quality_score", 0.7)
+            certainty = result.get("certainty_score", 0.7)
+            quality_boost = 0.5 + 0.3 * quality + 0.2 * certainty
+            scores[mem_id] = scores.get(mem_id, 0) + alpha * (1 / (k + rank + 1)) * quality_boost
 
         # Sort by combined score
         sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
@@ -575,14 +653,17 @@ class MemoryStorage:
     def get(self, memory_id: str) -> dict[str, Any] | None:
         """Get a specific memory by ID."""
         result = self.db.execute(
-            "SELECT id, content, memory_type, tags, source, client_id, project_id, created_at, updated_at FROM memories WHERE id = ?",
+            """SELECT id, content, memory_type, tags, source, client_id, project_id, created_at, updated_at,
+                      COALESCE(certainty_score, 0.7) as certainty_score,
+                      COALESCE(quality_score, 0.7) as quality_score
+               FROM memories WHERE id = ?""",
             [memory_id]
         ).fetchone()
 
         if not result:
             return None
 
-        columns = ["id", "content", "memory_type", "tags", "source", "client_id", "project_id", "created_at", "updated_at"]
+        columns = ["id", "content", "memory_type", "tags", "source", "client_id", "project_id", "created_at", "updated_at", "certainty_score", "quality_score"]
         return dict(zip(columns, result))
 
     def delete(self, memory_id: str) -> bool:
@@ -677,9 +758,11 @@ class MemoryStorage:
         self,
         memory_id: str,
         content: str | None = None,
-        tags: list[str] | None = None
+        tags: list[str] | None = None,
+        certainty_score: float | None = None,
+        quality_score: float | None = None,
     ) -> dict[str, Any] | None:
-        """Update an existing memory."""
+        """Update an existing memory's content, tags, or scores."""
         existing = self.get(memory_id)
         if not existing:
             return None
@@ -687,6 +770,12 @@ class MemoryStorage:
         now = datetime.now(timezone.utc)
         new_content = content if content is not None else existing["content"]
         new_tags = tags if tags is not None else existing["tags"]
+        new_certainty = certainty_score if certainty_score is not None else existing.get("certainty_score", 0.7)
+        new_quality = quality_score if quality_score is not None else existing.get("quality_score", 0.7)
+
+        # Clamp scores to valid range
+        new_certainty = max(0.0, min(1.0, new_certainty))
+        new_quality = max(0.0, min(1.0, new_quality))
 
         # Regenerate embedding if content changed
         new_embedding = None
@@ -697,19 +786,19 @@ class MemoryStorage:
             self.db.execute(
                 """
                 UPDATE memories
-                SET content = ?, tags = ?, updated_at = ?, embedding = ?
+                SET content = ?, tags = ?, updated_at = ?, embedding = ?, certainty_score = ?, quality_score = ?
                 WHERE id = ?
                 """,
-                [new_content, new_tags, now, new_embedding, memory_id],
+                [new_content, new_tags, now, new_embedding, new_certainty, new_quality, memory_id],
             )
         else:
             self.db.execute(
                 """
                 UPDATE memories
-                SET tags = ?, updated_at = ?
+                SET tags = ?, updated_at = ?, certainty_score = ?, quality_score = ?
                 WHERE id = ?
                 """,
-                [new_tags, now, memory_id],
+                [new_tags, now, new_certainty, new_quality, memory_id],
             )
 
         return self.get(memory_id)

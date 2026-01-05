@@ -51,6 +51,18 @@ def create_server(data_dir: str | None = None, client_id: str | None = None, pro
                             "type": "string",
                             "description": "Project to associate with (uses auto-detected project if not specified)",
                         },
+                        "certainty_score": {
+                            "type": "number",
+                            "description": "How certain this information is (0.0-1.0). Defaults based on memory_type.",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                        },
+                        "quality_score": {
+                            "type": "number",
+                            "description": "How valuable/useful this memory is (0.0-1.0). Defaults based on memory_type.",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                        },
                     },
                     "required": ["content"],
                 },
@@ -99,6 +111,20 @@ def create_server(data_dir: str | None = None, client_id: str | None = None, pro
                             "description": "Search mode: 'keyword' for exact matching, 'semantic' for meaning-based search, 'hybrid' combines both (default)",
                             "default": "hybrid",
                         },
+                        "min_certainty": {
+                            "type": "number",
+                            "description": "Minimum certainty score to include (0.0-1.0). Use to filter out uncertain memories.",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                            "default": 0.0,
+                        },
+                        "min_quality": {
+                            "type": "number",
+                            "description": "Minimum quality score to include (0.0-1.0). Use to filter out low-value memories.",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                            "default": 0.0,
+                        },
                     },
                 },
             ),
@@ -118,7 +144,7 @@ def create_server(data_dir: str | None = None, client_id: str | None = None, pro
             ),
             Tool(
                 name="memory_update",
-                description="Update an existing memory's content or tags.",
+                description="Update an existing memory's content, tags, or scores.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -134,6 +160,18 @@ def create_server(data_dir: str | None = None, client_id: str | None = None, pro
                             "type": "array",
                             "items": {"type": "string"},
                             "description": "New tags (optional, replaces existing)",
+                        },
+                        "certainty_score": {
+                            "type": "number",
+                            "description": "New certainty score (0.0-1.0)",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                        },
+                        "quality_score": {
+                            "type": "number",
+                            "description": "New quality score (0.0-1.0)",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
                         },
                     },
                     "required": ["memory_id"],
@@ -267,6 +305,8 @@ def create_server(data_dir: str | None = None, client_id: str | None = None, pro
                     source=arguments.get("source"),
                     client_id=_client_id,
                     project_id=project,
+                    certainty_score=arguments.get("certainty_score"),
+                    quality_score=arguments.get("quality_score"),
                 )
                 return [TextContent(type="text", text=f"Memory stored: {json.dumps(result, default=str)}")]
 
@@ -282,6 +322,8 @@ def create_server(data_dir: str | None = None, client_id: str | None = None, pro
                     global_search=arguments.get("global_search", False),
                     limit=arguments.get("limit", 20),
                     search_mode=arguments.get("search_mode", "hybrid"),
+                    min_certainty=arguments.get("min_certainty", 0.0),
+                    min_quality=arguments.get("min_quality", 0.0),
                 )
                 if not results:
                     return [TextContent(type="text", text="No memories found matching the criteria.")]
@@ -298,6 +340,8 @@ def create_server(data_dir: str | None = None, client_id: str | None = None, pro
                     memory_id=arguments["memory_id"],
                     content=arguments.get("content"),
                     tags=arguments.get("tags"),
+                    certainty_score=arguments.get("certainty_score"),
+                    quality_score=arguments.get("quality_score"),
                 )
                 if result:
                     return [TextContent(type="text", text=f"Memory updated: {json.dumps(result, default=str)}")]

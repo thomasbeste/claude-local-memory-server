@@ -49,11 +49,15 @@ class MemoryCreate(BaseModel):
     source: str | None = None
     client_id: str | None = None  # Can also be set via X-Client-ID header
     project_id: str | None = None  # Can also be set via X-Project-ID header
+    certainty_score: float | None = None  # 0.0-1.0, defaults based on memory_type
+    quality_score: float | None = None  # 0.0-1.0, defaults based on memory_type
 
 
 class MemoryUpdate(BaseModel):
     content: str | None = None
     tags: list[str] | None = None
+    certainty_score: float | None = None
+    quality_score: float | None = None
 
 
 class SearchQuery(BaseModel):
@@ -65,6 +69,8 @@ class SearchQuery(BaseModel):
     global_search: bool = False  # Search across all projects
     limit: int = 20
     search_mode: str = "hybrid"  # "keyword", "semantic", "hybrid"
+    min_certainty: float = 0.0  # Minimum certainty score to include (0.0-1.0)
+    min_quality: float = 0.0  # Minimum quality score to include (0.0-1.0)
 
 
 # --- App setup ---
@@ -217,6 +223,8 @@ async def create_memory(
         source=memory.source,
         client_id=client_id,
         project_id=project_id,
+        certainty_score=memory.certainty_score,
+        quality_score=memory.quality_score,
     )
     return result
 
@@ -242,6 +250,8 @@ async def search_memories(
         global_search=query.global_search,
         limit=query.limit,
         search_mode=query.search_mode,
+        min_certainty=query.min_certainty,
+        min_quality=query.min_quality,
     )
     return {"results": results, "count": len(results)}
 
@@ -271,7 +281,13 @@ async def update_memory(
     _: str | None = Depends(verify_api_key),
 ):
     """Update a memory."""
-    result = store.update(memory_id, content=update.content, tags=update.tags)
+    result = store.update(
+        memory_id,
+        content=update.content,
+        tags=update.tags,
+        certainty_score=update.certainty_score,
+        quality_score=update.quality_score,
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Memory not found")
     return result
@@ -360,6 +376,8 @@ def create_mcp_server(store: MemoryStorage) -> Server:
                         },
                         "source": {"type": "string", "description": "Optional source/context"},
                         "project_id": {"type": "string", "description": "Project to associate with"},
+                        "certainty_score": {"type": "number", "description": "How certain this info is (0.0-1.0)", "minimum": 0.0, "maximum": 1.0},
+                        "quality_score": {"type": "number", "description": "How valuable this memory is (0.0-1.0)", "minimum": 0.0, "maximum": 1.0},
                     },
                     "required": ["content"],
                 },
@@ -386,6 +404,8 @@ def create_mcp_server(store: MemoryStorage) -> Server:
                             "description": "Search mode",
                             "default": "hybrid",
                         },
+                        "min_certainty": {"type": "number", "description": "Minimum certainty score (0.0-1.0)", "minimum": 0.0, "maximum": 1.0, "default": 0.0},
+                        "min_quality": {"type": "number", "description": "Minimum quality score (0.0-1.0)", "minimum": 0.0, "maximum": 1.0, "default": 0.0},
                     },
                 },
             ),
@@ -400,13 +420,15 @@ def create_mcp_server(store: MemoryStorage) -> Server:
             ),
             Tool(
                 name="memory_update",
-                description="Update an existing memory's content or tags.",
+                description="Update an existing memory's content, tags, or scores.",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "memory_id": {"type": "string", "description": "The ID of the memory to update"},
                         "content": {"type": "string", "description": "New content (optional)"},
                         "tags": {"type": "array", "items": {"type": "string"}, "description": "New tags (optional)"},
+                        "certainty_score": {"type": "number", "description": "New certainty score (0.0-1.0)", "minimum": 0.0, "maximum": 1.0},
+                        "quality_score": {"type": "number", "description": "New quality score (0.0-1.0)", "minimum": 0.0, "maximum": 1.0},
                     },
                     "required": ["memory_id"],
                 },
@@ -458,6 +480,8 @@ def create_mcp_server(store: MemoryStorage) -> Server:
                     tags=arguments.get("tags"),
                     source=arguments.get("source"),
                     project_id=arguments.get("project_id"),
+                    certainty_score=arguments.get("certainty_score"),
+                    quality_score=arguments.get("quality_score"),
                 )
                 return [TextContent(type="text", text=f"Memory stored: {json.dumps(result, default=str)}")]
 
@@ -470,6 +494,8 @@ def create_mcp_server(store: MemoryStorage) -> Server:
                     global_search=arguments.get("global_search", False),
                     limit=arguments.get("limit", 20),
                     search_mode=arguments.get("search_mode", "hybrid"),
+                    min_certainty=arguments.get("min_certainty", 0.0),
+                    min_quality=arguments.get("min_quality", 0.0),
                 )
                 if not results:
                     return [TextContent(type="text", text="No memories found matching the criteria.")]
@@ -486,6 +512,8 @@ def create_mcp_server(store: MemoryStorage) -> Server:
                     memory_id=arguments["memory_id"],
                     content=arguments.get("content"),
                     tags=arguments.get("tags"),
+                    certainty_score=arguments.get("certainty_score"),
+                    quality_score=arguments.get("quality_score"),
                 )
                 if result:
                     return [TextContent(type="text", text=f"Memory updated: {json.dumps(result, default=str)}")]
